@@ -1,0 +1,34 @@
+{
+  "title": "References & further reading",
+  "groups": [
+    {
+      "heading": "Patterns",
+      "items": [
+        { "title": "API Gateway pattern", "detail": "Single entry point that routes, authenticates and rate-limits client requests for a set of backend services." },
+        { "title": "Backend for Frontend (BFF)", "detail": "A dedicated gateway variant tailored to a specific client type." },
+        { "title": "Reverse proxy", "detail": "A server that forwards client requests to upstream servers and returns their responses." },
+        { "title": "Service discovery & health checking", "detail": "How a load balancer learns which upstream instances are healthy." },
+        { "title": "Configuration externalization", "detail": "Keeping routing/feature configuration outside the running instances so it can change live." }
+      ]
+    },
+    {
+      "heading": "Concepts",
+      "items": [
+        { "title": "Layer 7 vs Layer 4 load balancing", "detail": "Application-aware routing (HTTP) versus connection-level routing (TCP/UDP)." },
+        { "title": "JSON Web Tokens (JWT)", "detail": "Signed tokens whose signatures are verified with public keys from a key store." },
+        { "title": "Token bucket rate limiting", "detail": "A bucket of tokens refilled at a fixed rate; requests spend tokens." },
+        { "title": "Graceful configuration reload", "detail": "Applying new routing rules without dropping in-flight requests or restarting." },
+        { "title": "Horizontal scaling", "detail": "Adding stateless instances behind a load balancer to increase capacity." }
+      ]
+    },
+    {
+      "heading": "Industry implementations",
+      "items": [
+        { "title": "NGINX / Envoy / HAProxy", "detail": "Production-grade reverse proxies and service proxies with L7 routing." },
+        { "title": "Kong / Traefik / AWS API Gateway", "detail": "Managed or self-hosted API gateway products." },
+        { "title": "HashiCorp Vault / AWS Secrets Manager", "detail": "Secret stores for signing keys and certificates." },
+        { "title": "Redis / etcd / Consul", "detail": "Low-latency stores commonly used for live configuration." }
+      ]
+    }
+  ]
+}

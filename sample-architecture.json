@@ -1,0 +1,487 @@
+{
+  "id": "default-case-study",
+  "name": "Dynamic L7 API Gateway & Reverse Proxy",
+  "description": "This system is a high-performance L7 API gateway and reverse proxy. A Rate Limiter drops excess traffic, and a Load Balancer spreads requests across multiple gateway instances running on cloud compute. Each gateway verifies the client's JWT using keys fetched from a Secret Manager, then routes the request to the User, Product, or Order service by URL path. Routing rules live in a shared Config Store that the gateways watch, so rules reload live without restarting. Each service has its own database.",
+  "nodes": [
+    {
+      "id": "client-1",
+      "type": "component",
+      "position": {
+        "x": 40,
+        "y": 300
+      },
+      "data": {
+        "label": "Web Client",
+        "type": "client",
+        "config": {
+          "requestRate": 50,
+          "requestMix": [
+            {
+              "path": "/users/profile",
+              "method": "GET",
+              "weight": 30
+            },
+            {
+              "path": "/products/list",
+              "method": "GET",
+              "weight": 40
+            },
+            {
+              "path": "/orders",
+              "method": "POST",
+              "weight": 20
+            },
+            {
+              "path": "/orders/1001",
+              "method": "GET",
+              "weight": 10
+            }
+          ],
+          "timeoutMs": 4000,
+          "burst": 0
+        },
+        "description": "Generates synthetic HTTP requests according to the configured rate and request mix. Enforces its own request timeout."
+      }
+    },
+    {
+      "id": "rl-1",
+      "type": "component",
+      "position": {
+        "x": 230,
+        "y": 300
+      },
+      "data": {
+        "label": "Rate Limiter",
+        "type": "rateLimiter",
+        "config": {
+          "requestsPerSecond": 60,
+          "burstCapacity": 30,
+          "strategy": "token-bucket",
+          "scope": "global",
+          "perRouteLimits": []
+        },
+        "description": "Admission control. Applies a token bucket or fixed window policy and rejects excess traffic with HTTP 429."
+      }
+    },
+    {
+      "id": "lb-1",
+      "type": "component",
+      "position": {
+        "x": 430,
+        "y": 300
+      },
+      "data": {
+        "label": "Load Balancer",
+        "type": "loadBalancer",
+        "config": {
+          "algorithm": "round-robin",
+          "weights": {},
+          "healthCheckIntervalMs": 1000,
+          "capacity": 200,
+          "serviceTimeMs": 1,
+          "queueLimit": 1000
+        },
+        "description": "Selects a healthy gateway VM using Round Robin, Least Connections or Weighted Round Robin and forwards the request."
+      }
+    },
+    {
+      "id": "gw-1",
+      "type": "component",
+      "position": {
+        "x": 640,
+        "y": 150
+      },
+      "data": {
+        "label": "Gateway VM 1",
+        "type": "gateway",
+        "config": {
+          "instanceName": "gateway-vm-1 (JWT Verify)",
+          "capacity": 60,
+          "serviceTimeMs": 6,
+          "queueLimit": 200,
+          "authEnabled": true,
+          "authFailureRate": 0,
+          "timeoutMs": 2000,
+          "maxRetries": 1
+        },
+        "description": "Layer-7 gateway VM. Verifies the client JWT with keys from the Secret Manager, matches the request path against the active routing table and forwards to a backend service."
+      }
+    },
+    {
+      "id": "gw-2",
+      "type": "component",
+      "position": {
+        "x": 640,
+        "y": 450
+      },
+      "data": {
+        "label": "Gateway VM 2",
+        "type": "gateway",
+        "config": {
+          "instanceName": "gateway-vm-2 (JWT Verify)",
+          "capacity": 60,
+          "serviceTimeMs": 6,
+          "queueLimit": 200,
+          "authEnabled": true,
+          "authFailureRate": 0,
+          "timeoutMs": 2000,
+          "maxRetries": 1
+        },
+        "description": "Layer-7 gateway VM. Verifies the client JWT with keys from the Secret Manager, matches the request path against the active routing table and forwards to a backend service."
+      }
+    },
+    {
+      "id": "svc-users",
+      "type": "component",
+      "position": {
+        "x": 900,
+        "y": 60
+      },
+      "data": {
+        "label": "User Service",
+        "type": "service",
+        "config": {
+          "serviceName": "user-service",
+          "endpoints": [
+            "/users/*"
+          ],
+          "capacity": 40,
+          "serviceTimeMs": 10,
+          "queueLimit": 150,
+          "errorRate": 0,
+          "timeoutMs": 2000,
+          "useCache": false
+        },
+        "description": "Application microservice. Processes matched endpoints, may consult the cache and its database."
+      }
+    },
+    {
+      "id": "svc-products",
+      "type": "component",
+      "position": {
+        "x": 900,
+        "y": 300
+      },
+      "data": {
+        "label": "Product Service",
+        "type": "service",
+        "config": {
+          "serviceName": "product-service",
+          "endpoints": [
+            "/products/*"
+          ],
+          "capacity": 40,
+          "serviceTimeMs": 14,
+          "queueLimit": 150,
+          "errorRate": 0,
+          "timeoutMs": 2000,
+          "useCache": false
+        },
+        "description": "Application microservice. Processes matched endpoints, may consult the cache and its database."
+      }
+    },
+    {
+      "id": "svc-orders",
+      "type": "component",
+      "position": {
+        "x": 900,
+        "y": 540
+      },
+      "data": {
+        "label": "Order Service",
+        "type": "service",
+        "config": {
+          "serviceName": "order-service",
+          "endpoints": [
+            "/orders/*"
+          ],
+          "capacity": 30,
+          "serviceTimeMs": 16,
+          "queueLimit": 150,
+          "errorRate": 0,
+          "timeoutMs": 2000,
+          "useCache": false
+        },
+        "description": "Application microservice. Processes matched endpoints, may consult the cache and its database."
+      }
+    },
+    {
+      "id": "db-users",
+      "type": "component",
+      "position": {
+        "x": 1160,
+        "y": 60
+      },
+      "data": {
+        "label": "User DB",
+        "type": "database",
+        "config": {
+          "databaseName": "users-db",
+          "capacity": 30,
+          "queryLatencyMs": 18,
+          "queueLimit": 120,
+          "errorRate": 0,
+          "connectionPoolSize": 20,
+          "lockContention": 0
+        },
+        "description": "Persistent storage with finite connection capacity, query latency and error rate."
+      }
+    },
+    {
+      "id": "db-products",
+      "type": "component",
+      "position": {
+        "x": 1160,
+        "y": 300
+      },
+      "data": {
+        "label": "Product DB",
+        "type": "database",
+        "config": {
+          "databaseName": "products-db",
+          "capacity": 30,
+          "queryLatencyMs": 18,
+          "queueLimit": 120,
+          "errorRate": 0,
+          "connectionPoolSize": 20,
+          "lockContention": 0
+        },
+        "description": "Persistent storage with finite connection capacity, query latency and error rate."
+      }
+    },
+    {
+      "id": "db-orders",
+      "type": "component",
+      "position": {
+        "x": 1160,
+        "y": 540
+      },
+      "data": {
+        "label": "Order DB",
+        "type": "database",
+        "config": {
+          "databaseName": "orders-db",
+          "capacity": 30,
+          "queryLatencyMs": 22,
+          "queueLimit": 120,
+          "errorRate": 0,
+          "connectionPoolSize": 20,
+          "lockContention": 0
+        },
+        "description": "Persistent storage with finite connection capacity, query latency and error rate."
+      }
+    },
+    {
+      "id": "redis-1",
+      "type": "component",
+      "position": {
+        "x": 640,
+        "y": 680
+      },
+      "data": {
+        "label": "Config Store",
+        "type": "configStore",
+        "config": {
+          "readLatencyMs": 2,
+          "writeLatencyMs": 4,
+          "cacheHitRatio": 0.9
+        },
+        "description": "Shared versioned routing configuration store. Gateways watch it and reload routing table versions live without restarting."
+      }
+    },
+    {
+      "id": "sm-1",
+      "type": "component",
+      "position": {
+        "x": 380,
+        "y": 680
+      },
+      "data": {
+        "label": "Secret Manager",
+        "type": "secretManager",
+        "config": {
+          "readLatencyMs": 2,
+          "keyRotationIntervalMs": 30000,
+          "storesTlsCertificates": true
+        },
+        "description": "Central secret store for JWT signing/public keys and TLS certificates. Gateways fetch secrets at startup and on key rotation."
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-client-rl",
+      "source": "client-1",
+      "target": "rl-1"
+    },
+    {
+      "id": "e-rl-lb",
+      "source": "rl-1",
+      "target": "lb-1"
+    },
+    {
+      "id": "e-lb-gw1",
+      "source": "lb-1",
+      "target": "gw-1"
+    },
+    {
+      "id": "e-lb-gw2",
+      "source": "lb-1",
+      "target": "gw-2"
+    },
+    {
+      "id": "e-gw1-users",
+      "source": "gw-1",
+      "target": "svc-users"
+    },
+    {
+      "id": "e-gw1-products",
+      "source": "gw-1",
+      "target": "svc-products"
+    },
+    {
+      "id": "e-gw1-orders",
+      "source": "gw-1",
+      "target": "svc-orders"
+    },
+    {
+      "id": "e-gw2-users",
+      "source": "gw-2",
+      "target": "svc-users"
+    },
+    {
+      "id": "e-gw2-products",
+      "source": "gw-2",
+      "target": "svc-products"
+    },
+    {
+      "id": "e-gw2-orders",
+      "source": "gw-2",
+      "target": "svc-orders"
+    },
+    {
+      "id": "e-users-db",
+      "source": "svc-users",
+      "target": "db-users"
+    },
+    {
+      "id": "e-products-db",
+      "source": "svc-products",
+      "target": "db-products"
+    },
+    {
+      "id": "e-orders-db",
+      "source": "svc-orders",
+      "target": "db-orders"
+    },
+    {
+      "id": "e-gw1-redis",
+      "source": "gw-1",
+      "target": "redis-1"
+    },
+    {
+      "id": "e-gw2-redis",
+      "source": "gw-2",
+      "target": "redis-1"
+    },
+    {
+      "id": "e-gw1-sm",
+      "source": "gw-1",
+      "target": "sm-1"
+    },
+    {
+      "id": "e-gw2-sm",
+      "source": "gw-2",
+      "target": "sm-1"
+    }
+  ],
+  "annotations": [],
+  "routing": {
+    "draftRules": [
+      {
+        "id": "rule-users",
+        "path": "/users/*",
+        "matchType": "prefix",
+        "methods": [
+          "ANY"
+        ],
+        "destinationId": "svc-users",
+        "priority": 10,
+        "enabled": true
+      },
+      {
+        "id": "rule-products",
+        "path": "/products/*",
+        "matchType": "prefix",
+        "methods": [
+          "ANY"
+        ],
+        "destinationId": "svc-products",
+        "priority": 10,
+        "enabled": true
+      },
+      {
+        "id": "rule-orders",
+        "path": "/orders/*",
+        "matchType": "prefix",
+        "methods": [
+          "ANY"
+        ],
+        "destinationId": "svc-orders",
+        "priority": 10,
+        "enabled": true
+      }
+    ],
+    "versions": [
+      {
+        "version": 1,
+        "rules": [
+          {
+            "id": "rule-users",
+            "path": "/users/*",
+            "matchType": "prefix",
+            "methods": [
+              "ANY"
+            ],
+            "destinationId": "svc-users",
+            "priority": 10,
+            "enabled": true
+          },
+          {
+            "id": "rule-products",
+            "path": "/products/*",
+            "matchType": "prefix",
+            "methods": [
+              "ANY"
+            ],
+            "destinationId": "svc-products",
+            "priority": 10,
+            "enabled": true
+          },
+          {
+            "id": "rule-orders",
+            "path": "/orders/*",
+            "matchType": "prefix",
+            "methods": [
+              "ANY"
+            ],
+            "destinationId": "svc-orders",
+            "priority": 10,
+            "enabled": true
+          }
+        ],
+        "publishedAtSimMs": 0,
+        "note": "Initial routing configuration"
+      }
+    ],
+    "publishedVersion": 1,
+    "propagationDelayMs": 2000,
+    "fallbackRouteId": null
+  },
+  "settings": {
+    "seed": 42,
+    "tickMs": 100,
+    "maxSimSeconds": 600,
+    "sampleIntervalMs": 500
+  }
+}

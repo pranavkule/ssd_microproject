@@ -1,0 +1,6 @@
+{
+  "default": "cs-16",
+  "caseStudies": [
+    { "id": "cs-16", "number": 16, "title": "Dynamic L7 API Gateway & Reverse Proxy", "path": "content/case-studies/cs-16.json" }
+  ]
+}

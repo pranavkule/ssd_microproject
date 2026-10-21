@@ -1,0 +1,187 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', 'Cascadia Mono', Menlo, Consolas, monospace;
+  --color-app-50: #f8fafc;
+  --color-app-100: #f1f5f9;
+  --color-app-200: #e2e8f0;
+  --color-app-300: #cbd5e1;
+  --color-app-400: #94a3b8;
+  --color-app-500: #64748b;
+  --color-app-600: #475569;
+  --color-app-700: #334155;
+  --color-app-800: #1e293b;
+  --color-app-900: #0f172a;
+  --color-app-950: #020617;
+  --color-accent-50: #eff6ff;
+  --color-accent-100: #dbeafe;
+  --color-accent-500: #3b82f6;
+  --color-accent-600: #2563eb;
+  --color-accent-700: #1d4ed8;
+
+  /* Shared layout tokens: one radius scale + 4px spacing scale. */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/* The lab owns its own scrolling regions; the page itself must never scroll. */
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--color-app-100);
+  color: var(--color-app-900);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+.dark body {
+  background: var(--color-app-950);
+  color: var(--color-app-50);
+}
+
+/* React Flow overrides */
+.react-flow__attribution {
+  display: none;
+}
+
+.react-flow__node {
+  font-size: 13px;
+}
+
+/* Keep the canvas surface consistent with the active theme. */
+.react-flow {
+  background: var(--color-app-50);
+}
+
+.dark .react-flow {
+  background: var(--color-app-900);
+}
+
+.dark .react-flow__controls-button {
+  background: var(--color-app-800);
+  border-bottom: 1px solid var(--color-app-700);
+  color: var(--color-app-200);
+}
+
+.dark .react-flow__controls-button:hover {
+  background: var(--color-app-700);
+}
+
+.dark .react-flow__handle {
+  border-color: var(--color-app-900);
+}
+
+.react-flow__handle {
+  width: 8px;
+  height: 8px;
+  border: 2px solid white;
+  background: var(--color-app-400);
+}
+
+.react-flow__handle:hover {
+  background: var(--color-accent-500);
+}
+
+.react-flow__edge-path {
+  stroke-width: 1.6;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--color-accent-600);
+  stroke-width: 2.2;
+}
+
+.react-flow__controls-button {
+  background: white;
+  border-bottom: 1px solid var(--color-app-200);
+  color: var(--color-app-700);
+}
+
+.react-flow__controls-button:hover {
+  background: var(--color-app-50);
+}
+
+.react-flow__controls-button svg {
+  fill: currentColor;
+}
+
+.thin-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.thin-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: var(--color-app-300);
+  border-radius: 4px;
+}
+
+.thin-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--color-app-400);
+}
+
+@keyframes flow-dot {
+  0% {
+    stroke-dashoffset: 18;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+.edge-active .react-flow__edge-path {
+  stroke-dasharray: 6 6;
+  animation: flow-dot 0.6s linear infinite;
+}
+
+.edge-failed .react-flow__edge-path {
+  stroke: #ef4444;
+}
+
+@keyframes pulse-warn {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.15);
+  }
+}
+
+.node-warn {
+  animation: pulse-warn 1.4s ease-in-out infinite;
+}
+
+@keyframes request-dot {
+  0% {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    offset-distance: 100%;
+    opacity: 0;
+  }
+}
