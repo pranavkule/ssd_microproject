@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Phase 6 React dashboard at `http://localhost:5173` is the administration UI for the gateway at
+The React dashboard at `http://localhost:5173` is the administration UI for the gateway at
 `http://localhost:8000`. The gateway is the frontend's only backend entry point. The UI reads
 operational state from `/health` and MongoDB-backed route configuration from
 `/api/gateway/routes`; it does not keep a separate copy of route or backend configuration.
@@ -15,17 +15,16 @@ retains the last known data with an error message if a later request fails.
 
 | Page | Path | Purpose |
 | --- | --- | --- |
-| Overview | `/` | Gateway/database status, route and backend totals, backend health, route summary |
+| Overview | `/` | Gateway/database status, route/backend totals, and current-process request metrics |
 | Routes | `/routes` | Search/filter routes, create/edit/detail, enable/disable, delete, refresh registry |
 | Route details | `/routes/:id` | Full route configuration and its backends |
 | Backend instances | `/backends` | Add/edit/enable/disable/remove instances configured under routes |
 | Load balancing | `/load-balancing` | Configure per-route supported strategy and see gateway-reported eligible backends |
 | Health monitoring | `/health` | Gateway, MongoDB, registry, and backend health-check details |
-| Activity logs | Not available | Navigation is disabled: logs are terminal-only and there is no log retrieval API |
+| Activity logs | `/activity-logs` | Search and paginate actual persisted request records |
+| Gateway settings | `/settings` | Retrieve and update supported persistent runtime settings |
 
-Settings are not shown because the backend does not expose a settings-management API. Dashboard
-analytics, request distribution charts, and request-history tables are also intentionally omitted;
-the gateway does not expose those metrics.
+Metrics show current-process request counts only; no historical traffic distribution is fabricated.
 
 ## API Integration
 
@@ -43,6 +42,10 @@ The Axios instance and API functions are in `frontend/src/services/api.js`. Its 
 | Enable/disable route | `PATCH /api/gateway/routes/:id/toggle` |
 | Delete route | `DELETE /api/gateway/routes/:id` |
 | Refresh runtime registry | `POST /api/gateway/routes/refresh` |
+| Activity logs and filters | `GET /api/gateway/logs` |
+| Current process metrics | `GET /api/gateway/metrics` |
+| Read runtime configuration | `GET /api/gateway/config` |
+| Persist and apply runtime configuration | `PUT /api/gateway/config` |
 
 Backend instance and load-balancing functions use the route `PUT` API because the gateway has no
 separate backend or strategy endpoints. HTTP status/error messages returned by the gateway are
@@ -85,8 +88,9 @@ The **Load balancing** page supports `round_robin`, `least_connections`, and `ra
 strategy for a route and save it; the UI calls `PUT /api/gateway/routes/:id` and reloads the route
 and health data. The page lists backend eligibility from the gateway's latest health response.
 
-The gateway does not expose request distribution or active connection metrics through an API, so no
-such counts or charts are shown.
+No historical distribution charts are shown. The Overview displays actual in-memory process totals,
+successful/failed request counts, status-code counts, and average latency from
+`/api/gateway/metrics`. The API also returns active-request and per-route counters for API consumers.
 
 ## Health Monitoring Workflow
 
@@ -96,8 +100,21 @@ failures. The gateway is the source of truth. Its health monitor excludes a back
 configured failure threshold and restores it after the configured recovery threshold. Refreshing
 the page requests current health; it does not alter backend health.
 
-The Activity Logs entry is disabled rather than a placeholder because the gateway only logs request
-events to terminal output and does not provide a log retrieval API.
+## Activity Logs
+
+The Activity Logs page reads completed public/proxy traffic from
+`GET /api/gateway/logs`, with server-side method, status, route, outcome, date, and request-ID
+filters plus pagination. `/health` and gateway management requests are excluded. Request headers
+and bodies are not stored; sensitive query values are redacted. MongoDB unavailability produces an
+explicit API error rather than fabricated log rows.
+
+## Gateway Settings
+
+Gateway Settings uses `GET /api/gateway/config` and partial updates through `PUT
+/api/gateway/config`. It exposes only upstream timeout and backend health-check interval, timeout,
+failure-threshold, and recovery-threshold controls. Values are range-validated, persisted in
+MongoDB, and applied at runtime. Environment defaults remain active when MongoDB is unavailable;
+updates are disabled until persistence is available.
 
 ## Environment Configuration
 
@@ -136,3 +153,5 @@ npm run test:integration
 
 The MongoDB integration suite creates and drops a unique test database. Set its URI only to a
 dedicated test server; do not use a database containing user data.
+See [database.md](database.md) for log schema, endpoint filters, metrics lifetime, configuration
+ranges, and MongoDB failure behavior.

@@ -18,6 +18,7 @@ const env = {
   productServiceUrl: process.env.PRODUCT_SERVICE_URL || 'http://localhost:5003',
   orderServiceUrl: process.env.ORDER_SERVICE_URL || 'http://localhost:5005',
   paymentServiceUrl: process.env.PAYMENT_SERVICE_URL || 'http://localhost:5007',
+  proxyTimeoutMs: positiveInteger(process.env.GATEWAY_PROXY_TIMEOUT_MS, 10000),
   healthCheckPath: process.env.BACKEND_HEALTH_CHECK_PATH || '/health',
   healthCheckIntervalMs: positiveInteger(
     process.env.BACKEND_HEALTH_CHECK_INTERVAL_MS,

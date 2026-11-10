@@ -1,12 +1,15 @@
 const routeRegistry = require('../services/routeRegistry');
-const { createDynamicProxy } = require('../services/proxyService');
+const proxyService = require('../services/proxyService');
 const { attachRequestLogging } = require('../middleware/requestLogger');
 const backendHealthMonitor = require('../services/backendHealthMonitor');
 const loadBalancer = require('../services/loadBalancer');
 
-const proxy = createDynamicProxy();
-
 function sendMethodNotAllowed(req, res, match) {
+  req.gatewayMatchedRoute =
+    routeRegistry.getRoutes().find((route) => route.path === match.matchedPath) || {
+      name: match.routeName,
+    };
+  res.locals.gatewayErrorCategory = 'method_not_allowed';
   const allowHeader = match.allowedMethods.join(', ');
 
   res.set('Allow', allowHeader);
@@ -32,11 +35,13 @@ function proxyRoutes(req, res, next) {
     return next();
   }
 
+  req.gatewayRoute = match.route;
   const selection = loadBalancer.selectBackend(
     match.route,
     backendHealthMonitor
   );
   if (!selection) {
+    res.locals.gatewayErrorCategory = 'no_healthy_backend';
     console.warn(
       `[GATEWAY] No healthy backend available for route ${match.route.name}`
     );
@@ -60,7 +65,7 @@ function proxyRoutes(req, res, next) {
   res.once('close', release);
   attachRequestLogging(req, res, req.gatewayRoute, backend);
 
-  return proxy(req, res, next);
+  return proxyService.getDynamicProxy()(req, res, next);
 }
 
 module.exports = proxyRoutes;

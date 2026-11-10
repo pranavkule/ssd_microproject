@@ -6,6 +6,8 @@ import RouteDetails from './pages/RouteDetails.jsx';
 import BackendsPage from './pages/BackendsPage.jsx';
 import LoadBalancingPage from './pages/LoadBalancingPage.jsx';
 import HealthPage from './pages/HealthPage.jsx';
+import ActivityLogsPage from './pages/ActivityLogsPage.jsx';
+import GatewaySettingsPage from './pages/GatewaySettingsPage.jsx';
 import NotFound from './pages/NotFound.jsx';
 import { DashboardProvider, ToastProvider } from './contexts/DashboardContext.jsx';
 
@@ -21,6 +23,8 @@ function App() {
             <Route path="backends" element={<BackendsPage />} />
             <Route path="load-balancing" element={<LoadBalancingPage />} />
             <Route path="health" element={<HealthPage />} />
+            <Route path="activity-logs" element={<ActivityLogsPage />} />
+            <Route path="settings" element={<GatewaySettingsPage />} />
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>

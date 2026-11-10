@@ -6,10 +6,13 @@ const routeManagementRoutes = require('./routes/routeManagementRoutes');
 const proxyRoutes = require('./routes/proxyRoutes');
 const notFound = require('./middleware/notFound');
 const errorHandler = require('./middleware/errorHandler');
+const { requestTelemetry } = require('./middleware/requestTelemetry');
+const gatewayManagementRoutes = require('./routes/gatewayManagementRoutes');
 
 const app = express();
 
 app.disable('x-powered-by');
+app.use(requestTelemetry);
 
 app.use(
   cors({
@@ -30,6 +33,11 @@ app.use((req, res, next) => {
   return next();
 });
 
+app.use(
+  '/api/gateway',
+  express.json({ limit: '100kb' }),
+  gatewayManagementRoutes
+);
 app.use(
   '/api/gateway/routes',
   express.json({ limit: '100kb' }),

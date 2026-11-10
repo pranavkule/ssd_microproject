@@ -8,7 +8,7 @@ function statusKey(routeId, backendId) {
 }
 
 function createHealthMonitor(options = {}) {
-  const config = {
+  let config = {
     checkPath: options.checkPath || env.healthCheckPath,
     intervalMs: options.intervalMs || env.healthCheckIntervalMs,
     timeoutMs: options.timeoutMs || env.healthCheckTimeoutMs,
@@ -260,6 +260,22 @@ function createHealthMonitor(options = {}) {
     }
   }
 
+  function updateConfiguration(updates) {
+    config = { ...config, ...updates };
+    if (timer) {
+      clearInterval(timer);
+      timer = setInterval(() => {
+        void checkAll();
+      }, config.intervalMs);
+      timer.unref();
+    }
+    return { ...config };
+  }
+
+  function getConfiguration() {
+    return { ...config };
+  }
+
   function getBackendHealth(route, backend) {
     return getStatus(route, backend);
   }
@@ -282,6 +298,8 @@ function createHealthMonitor(options = {}) {
     start,
     stop,
     syncRoutes,
+    updateConfiguration,
+    getConfiguration,
   };
 }
 

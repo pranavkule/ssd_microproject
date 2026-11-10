@@ -1,4 +1,5 @@
 function notFound(req, res) {
+  res.locals.gatewayErrorCategory = 'unmatched_route';
   res.status(404).json({
     success: false,
     error: 'ROUTE_NOT_FOUND',

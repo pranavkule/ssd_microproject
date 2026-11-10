@@ -5,6 +5,8 @@ const { connectDatabase } = require('./config/db');
 const routeRegistry = require('./services/routeRegistry');
 const routeService = require('./services/routeService');
 const backendHealthMonitor = require('./services/backendHealthMonitor');
+const gatewayConfiguration = require('./services/gatewayConfiguration');
+const GatewayRequestLog = require('./models/GatewayRequestLog');
 
 let server;
 
@@ -16,6 +18,12 @@ async function startGateway() {
       new Error('MongoDB was unavailable during gateway startup')
     );
   } else {
+    try {
+      await GatewayRequestLog.init();
+    } catch (error) {
+      console.error(`[LOGS] Unable to initialize request log indexes: ${error.message}`);
+    }
+    await gatewayConfiguration.initialize();
     try {
       await routeService.initializeRouteSystem();
     } catch (error) {

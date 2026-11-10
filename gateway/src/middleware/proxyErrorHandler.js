@@ -4,6 +4,7 @@ const TIMEOUT_ERROR_CODES = new Set([
   'ECONNABORTED',
   'ERR_SOCKET_CONNECTION_TIMEOUT',
 ]);
+const { getSafeRequestUrl } = require('../utils/requestLogSanitizer');
 
 function proxyErrorHandler(error, req, res, route, proxyTimeoutMs) {
   const startedAt = res.locals.proxyStartedAt || Date.now();
@@ -19,9 +20,12 @@ function proxyErrorHandler(error, req, res, route, proxyTimeoutMs) {
   const message = isTimeout
     ? `${routeName} timed out while processing the request`
     : `${routeName} is currently unavailable`;
+  res.locals.gatewayErrorCategory = isTimeout
+    ? 'upstream_timeout'
+    : 'upstream_unavailable';
 
   console.error(
-    `[GATEWAY] ${new Date().toISOString()} Proxy failure: ${req.method} ${req.originalUrl} -> ${routeName} | ${statusCode} | ${duration}ms | ${error.code || 'PROXY_ERROR'}`
+    `[GATEWAY] ${new Date().toISOString()} Proxy failure: ${req.method} ${getSafeRequestUrl(req.originalUrl)} -> ${routeName} | ${statusCode} | ${duration}ms | ${error.code || 'PROXY_ERROR'}`
   );
 
   if (res.headersSent || res.writableEnded) {

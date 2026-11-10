@@ -5,6 +5,7 @@ const DashboardContext = createContext(null);
 
 export function DashboardProvider({ children }) {
   const [health, setHealth] = useState(null);
+  const [metrics, setMetrics] = useState(null);
   const [routes, setRoutes] = useState([]);
   const [registry, setRegistry] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -23,8 +24,9 @@ export function DashboardProvider({ children }) {
     const request = Promise.allSettled([
       gatewayApi.getHealth(),
       gatewayApi.listRoutes(),
+      gatewayApi.getMetrics(),
     ])
-      .then(([healthResult, routesResult]) => {
+      .then(([healthResult, routesResult, metricsResult]) => {
         if (!mounted.current) return;
         const messages = [];
         if (healthResult.status === 'fulfilled') {
@@ -39,6 +41,9 @@ export function DashboardProvider({ children }) {
           setRegistry(routesResult.value.registry || null);
         } else {
           messages.push(getErrorMessage(routesResult.reason));
+        }
+        if (metricsResult.status === 'fulfilled') {
+          setMetrics(metricsResult.value);
         }
         setError(messages.join(' '));
         if (messages.length === 0) setLastUpdated(new Date());
@@ -66,6 +71,7 @@ export function DashboardProvider({ children }) {
 
   const value = {
     health,
+    metrics,
     routes,
     registry,
     loading,

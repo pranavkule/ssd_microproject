@@ -8,6 +8,8 @@ application skeleton, development tooling, and MongoDB connectivity reporting. P
 independently runnable backend microservices. Phase 3 introduces reverse proxying. Phase 4 replaces
 static proxy configuration with a MongoDB-backed dynamic route registry and management API. Phase 5
 adds multiple backend instances per route, load balancing, and backend health monitoring.
+Phase 6 provides the administrator dashboard. Phase 7 adds persisted request records, process
+metrics, and a supported runtime gateway configuration API.
 
 ## High-Level Architecture
 
@@ -25,8 +27,9 @@ adds multiple backend instances per route, load balancing, and backend health mo
 | Express Gateway Application                                      |
 | http://localhost:8000                                            |
 |                                                                  |
-| - CORS and request completion logging                            |
+| - Request IDs, CORS, and asynchronous request telemetry           |
 | - Dynamic route management API at /api/gateway/routes            |
+| - Log, metrics, and configuration management APIs                |
 | - In-memory immutable route registry                             |
 | - Longest-prefix dynamic reverse proxy                           |
 | - /health management endpoint                                    |
@@ -47,7 +50,7 @@ adds multiple backend instances per route, load balancing, and backend health mo
 +------------------------------------------------------------------+
 | MongoDB                                                          |
 | dynamic_api_gateway                                              |
-| routes, users, products, orders, payments                        |
+| routes, request logs, gateway config, users, products, orders... |
 +------------------------------------------------------------------+
 ```
 
@@ -69,10 +72,11 @@ Implemented responsibilities:
 - Add, edit, enable, disable, and remove route backend instances.
 - Configure per-route load-balancing strategies and view currently eligible backends.
 - Inspect health-check status, last check, and failure counts.
+- Search and paginate persisted activity logs, inspect live process metrics, and edit supported
+  gateway timeout/health-check configuration.
 
-Activity Logs navigation is intentionally unavailable because request logs are terminal-only and
-there is no log retrieval API. Authentication, authorization, and API-key management are outside the
-implemented dashboard scope.
+Activity logs are backed by the request-log API; they do not contain headers or bodies and sensitive
+query values are redacted. Metrics show current-process values only.
 
 ### Gateway Application
 
@@ -100,6 +104,10 @@ Implemented responsibilities:
 - Return structured `503` when no configured backend is healthy and enabled.
 - Keep the previous route snapshot active when MongoDB becomes unavailable.
 - Report registry state through `/health` and log management changes.
+- Persist completed public proxy request metadata asynchronously; expose bounded log filters and
+  pagination.
+- Maintain in-memory per-process traffic counters and expose their lifetime/reset scope explicitly.
+- Persist supported proxy-timeout and health-check settings; apply valid updates at runtime.
 - Continue serving management endpoints while a backend service is unavailable.
 - Recover automatically when a backend service restarts.
 
@@ -109,23 +117,23 @@ rewriting do not query MongoDB per request.
 
 Middleware order is deliberate:
 
-1. CORS.
-2. Route management router at `/api/gateway/routes`, with a scoped JSON body parser.
-3. `/health`.
-4. Dynamic proxy router.
-5. Gateway 404 handling.
-6. Centralized gateway error handling.
+1. Request-ID and completion telemetry middleware. Health and management paths are excluded from
+   public traffic logs and metrics.
+2. CORS and gateway-handled browser preflight.
+3. Gateway management APIs, including route, log, metrics, and configuration endpoints.
+4. `/health`.
+5. Dynamic proxy router.
+6. Gateway 404 and centralized error handling.
 
 Management and health routes are registered before the proxy so a configurable route cannot shadow
-them. The proxy is registered before any global body parser so request bodies are streamed to the
-target service.
+them. JSON body parsing is scoped to gateway management endpoints; proxy request bodies are streamed
+to the target service.
 
 Planned responsibilities:
 
 - Retries and circuit breaking.
 - Rate limiting, authentication, and access policies.
-- Gateway request-metric persistence.
-- Dashboard analytics screens.
+- Historical/distributed metrics and log retention policies.
 
 ### Backend Microservices
 
@@ -152,6 +160,8 @@ connection string from `MONGODB_URI` and share the `dynamic_api_gateway` databas
 Collections:
 
 - `routes`: dynamic gateway route and backend-instance definitions.
+- `gatewayrequestlogs`: sanitized completed public request metadata.
+- `gatewayconfigurations`: singleton persisted runtime timeout and health-check settings.
 - `users`, `products`, `orders`, `payments`: microservice domain data from Phase 2.
 
 The gateway reports its own connection state and route registry state through `/health`; it does not
@@ -194,7 +204,7 @@ Client
   -> Target microservice
   -> Microservice validation / business logic / MongoDB
   -> Response status, headers, and body
-  -> Gateway completion log
+  -> Response completion updates process metrics and asynchronously persists a sanitized log
   -> Client
 ```
 
@@ -236,7 +246,9 @@ successful refresh restores normal management behavior.
 | Route and backend instance management UI | Implemented |
 | Load-balancing strategy configuration UI | Implemented |
 | Health monitoring UI | Implemented |
-| Activity log retrieval UI | Not available (no retrieval API) |
+| Activity log retrieval UI backed by MongoDB API | Implemented |
+| Current-process traffic metrics | Implemented |
+| Persistent, runtime-applied gateway settings | Implemented |
 | React Router configuration | Implemented |
 | Axios API client | Implemented |
 | Tailwind CSS styling | Implemented |
@@ -255,12 +267,12 @@ successful refresh restores normal management behavior.
 | Per-route method enforcement and `405` | Implemented |
 | Optional `stripPrefix` rewriting | Implemented |
 | Proxy logging and `502`/`504` handling | Implemented |
+| Redacted request ID and asynchronous persisted request logging | Implemented |
 | Registry health reporting, enabled/disabled counts, and stale recovery | Implemented |
 | Round Robin, Least Connections, and Random per-route balancing | Implemented |
 | Periodic backend health checks and failover/recovery | Implemented |
 | Dynamic route management UI | Implemented |
-| Dashboard analytics | Planned |
-| Request metric persistence | Planned |
+| Historical/distributed analytics | Planned |
 | Retries, circuit breaking, authentication, and rate limiting | Planned |
 | Service-to-service communication | Planned |
 
@@ -272,14 +284,18 @@ upstream failure handling. Phase 4 added MongoDB-backed route management, dynami
 path rewriting, method enforcement, registry health reporting, and database failure recovery.
 Phase 5 added multiple backends per route, health-aware load balancing, backend status reporting,
 and failover/recovery.
+Phase 7 added request IDs, sanitized asynchronous request persistence, log query/pagination APIs,
+current-process traffic metrics, and MongoDB-backed runtime timeout/health-check settings. Phase 7
+does not add authentication, secrets-provider integration, rate limiting, or distributed metrics.
 
-Phase 5 deliberately excludes retries, circuit breaking, authentication, rate limiting, request
-metrics, and WebSocket proxying. Phase 6 provides the administrator dashboard over existing gateway
-APIs; it does not add a log storage or retrieval service.
+Phases 5–7 deliberately exclude retries, circuit breaking, authentication, rate limiting, and
+WebSocket proxying. Metrics are process-local and reset at restart; log persistence depends on
+MongoDB availability.
 
 Gateway tests use Node's built-in test runner. Run `npm run test:unit` without MongoDB. The separate
 management and persistence suite requires a reachable MongoDB server and an
 `GATEWAY_TEST_MONGODB_URI` value; it creates and drops a unique test database. Run it with
 `npm run test:integration`. Do not point the test URI at a database containing user data. See
 [load-balancing.md](load-balancing.md) for backend selection and monitoring details, and
-[dashboard.md](dashboard.md) for the UI and API integration.
+[dashboard.md](dashboard.md) for the UI and API integration. See [database.md](database.md) for
+request logs, metrics, configuration, and test prerequisites.

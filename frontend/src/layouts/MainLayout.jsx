@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
   Activity, Boxes, ChevronLeft, ChevronRight, CircleDot, Gauge,
-  LayoutDashboard, Menu, Network, ScrollText, Waypoints, X,
+  LayoutDashboard, Menu, Network, ScrollText, Waypoints, X, SlidersHorizontal,
 } from 'lucide-react';
 import { useDashboard } from '../contexts/DashboardContext.jsx';
 import { RefreshButton, StatusBadge } from '../components/DashboardUI.jsx';
@@ -14,6 +14,8 @@ const navigation = [
   { to: '/backends', label: 'Backend instances', icon: Boxes },
   { to: '/load-balancing', label: 'Load balancing', icon: Network },
   { to: '/health', label: 'Health monitoring', icon: Activity },
+  { to: '/activity-logs', label: 'Activity logs', icon: ScrollText },
+  { to: '/settings', label: 'Gateway settings', icon: SlidersHorizontal },
 ];
 
 function MainLayout() {
@@ -54,10 +56,6 @@ function MainLayout() {
               {!collapsed ? <span>{label}</span> : null}
             </NavLink>
           ))}
-          <div className="nav-link nav-disabled" title="Request logs are currently available in gateway terminal output only">
-            <ScrollText size={18} />
-            {!collapsed ? <><span>Activity logs</span><span className="nav-tag">CLI</span></> : null}
-          </div>
         </nav>
         <div className="sidebar-bottom">
           <div className="sidebar-connection"><CircleDot size={15} /><span>{collapsed ? 'API' : gatewayConnection.sidebarLabel}</span></div>

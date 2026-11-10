@@ -6,6 +6,7 @@ const DEFAULT_ERROR_CODES = {
   500: 'INTERNAL_ERROR',
   503: 'SERVICE_UNAVAILABLE',
 };
+const { getSafeRequestUrl } = require('../utils/requestLogSanitizer');
 
 function errorHandler(error, req, res, next) {
   if (res.headersSent) {
@@ -38,7 +39,7 @@ function errorHandler(error, req, res, next) {
   }
 
   if (statusCode >= 500) {
-    console.error(`[GATEWAY] ${req.method} ${req.originalUrl} failed:`, error);
+    console.error(`[GATEWAY] ${req.method} ${getSafeRequestUrl(req.originalUrl)} failed:`, error);
   }
 
   if (statusCode === 500 && !error.exposed) {
@@ -46,6 +47,7 @@ function errorHandler(error, req, res, next) {
     errorCode = 'INTERNAL_ERROR';
   }
 
+  res.locals.gatewayErrorCategory = errorCode || `http_${statusCode}`;
   res.status(statusCode).json({
     success: false,
     error: errorCode || DEFAULT_ERROR_CODES[statusCode] || 'REQUEST_FAILED',

@@ -19,12 +19,12 @@ rules, and detailed verification results.
 
 The order is important for both body streaming and path isolation:
 
-1. CORS.
-2. Route management router at `/api/gateway/routes` with a scoped `express.json()` parser.
-3. `/health` management endpoint.
-4. Dynamic proxy router.
-5. Gateway 404 handler.
-6. Centralized error handler.
+1. Request ID and completion telemetry (health and `/api/gateway/*` excluded from public metrics/logs).
+2. CORS and gateway-handled browser preflight.
+3. Gateway management APIs, including routes, logs, metrics, and configuration.
+4. `/health`.
+5. Dynamic proxy router.
+6. Gateway 404 handler and centralized error handler.
 
 Management and health endpoints are registered before the dynamic proxy, so a route path cannot
 intercept them. The proxy is registered before any global body parser; request bodies are streamed
@@ -72,6 +72,7 @@ Copy `gateway/.env.example` to `gateway/.env` and adjust values if needed.
 | `BACKEND_HEALTH_CHECK_TIMEOUT_MS` | `1500` | Timeout for one backend health check |
 | `BACKEND_HEALTH_CHECK_FAILURE_THRESHOLD` | `2` | Consecutive failures before a backend becomes unhealthy |
 | `BACKEND_HEALTH_CHECK_RECOVERY_THRESHOLD` | `1` | Consecutive successes before an unhealthy backend recovers |
+| `GATEWAY_PROXY_TIMEOUT_MS` | `10000` | Default timeout for one upstream request; can be changed through config API |
 
 Service URL variables are used only when seeding missing default routes. Once a route exists, its
 persisted target is authoritative and is changed through the management API.
@@ -110,6 +111,10 @@ error instead of crashing.
 | `PATCH` | `/api/gateway/routes/:id/toggle` | Toggle or explicitly set enabled state |
 | `DELETE` | `/api/gateway/routes/:id` | Delete a route |
 | `POST` | `/api/gateway/routes/refresh` | Reload routes from MongoDB |
+| `GET` | `/api/gateway/logs` | Query persisted completed proxy request records |
+| `GET` | `/api/gateway/metrics` | Read current-process public proxy traffic metrics |
+| `GET` | `/api/gateway/config` | Read effective runtime settings and their source |
+| `PUT` | `/api/gateway/config` | Persist and apply supported timeout/health-check settings |
 
 Create a route:
 
@@ -180,7 +185,8 @@ the request is not a browser preflight.
 4. A method mismatch returns `405` with an `Allow` header.
 5. A matching request records the route name and start time, then streams to the route target.
 6. The target's status, headers, and body are returned through the gateway.
-7. A completion log records the method, path, route name, status, and duration.
+7. A request ID is returned in `X-Request-Id`; completed public requests update process metrics and
+   are persisted asynchronously when MongoDB is available.
 
 Paths and query strings are preserved unless the route has `stripPrefix: true`. With
 `stripPrefix: true`, the matched route path is removed and the target pathname is retained:
@@ -316,7 +322,29 @@ proxy request handling.
 The response also includes `routes`, with each configured backend's health state and the route's
 load-balancing strategy.
 
-## Logging
+## Request Logs, Metrics, and Runtime Configuration
+
+Completed proxied and unmatched public requests are stored in the shared MongoDB database through
+`GatewayRequestLog`. Query values for sensitive key names (tokens, passwords, credentials, etc.) are
+redacted. Request headers and bodies are not recorded. MongoDB write failures are logged and do not
+block or fail the proxy response. The `/health` endpoint and gateway-management API calls are
+excluded from request logs and traffic metrics.
+
+`GET /api/gateway/logs` supports `method`, `statusCode`, `route`, `success`, inclusive `from`/`to`
+dates, `requestId`, and bounded `page`/`limit` filters. It returns `data` and total/page metadata;
+invalid filters return 400 and a disconnected database returns 503. See [database.md](database.md)
+for the complete filter table and response example.
+
+`GET /api/gateway/metrics` reports total, successful, failed, active, status-code, per-route, and
+average-duration counters for the current process only. Metrics are in memory, exclude management
+and health polling, and reset on restart; they are not historical log aggregates.
+
+`GET` and `PUT /api/gateway/config` read and update only supported timeout and backend health-check
+settings. Configuration is stored in the `gatewayconfigurations` collection and applied to the
+running proxy and health monitor immediately. When MongoDB is unavailable, the gateway uses
+environment defaults or its in-memory database cache, and rejects configuration writes with 503.
+
+## Console Logging
 
 Registry changes are logged to stdout:
 
@@ -331,7 +359,7 @@ Registry changes are logged to stdout:
 [ROUTES] Registry refreshed successfully
 ```
 
-Successful and completed proxy requests are logged to stdout:
+Successful and completed proxy requests are also logged to stdout:
 
 ```text
 [GATEWAY] <timestamp> <METHOD> <originalUrl> -> <route-name> | <status> | <duration>ms
@@ -343,7 +371,8 @@ Proxy failures are logged to stderr with the failure cause:
 [GATEWAY] 2026-11-10T05:38:45.355Z Proxy failure: GET /api/users -> User Service | 502 | 2ms | ECONNREFUSED
 ```
 
-Query strings are included in the logged request URL. Request headers and bodies are not logged.
+Safe query strings may be included in the console URL, with sensitive query values redacted.
+Request headers and bodies are not logged.
 
 ## Phase 5 Limitations
 
@@ -351,8 +380,8 @@ The following are intentionally not implemented yet:
 
 - Retries and circuit breaking.
 - Authentication, API keys, rate limiting, and access policies.
-- Dashboard route-management screens and analytics.
-- Request metric persistence, WebSocket proxying, and streaming-specific configuration.
+- Historical request metrics and long-term retention policies.
+- WebSocket proxying and streaming-specific configuration.
 - The optional backend `weight` value is configuration metadata; Round Robin, Least Connections,
   and Random do not use weighted selection.
 

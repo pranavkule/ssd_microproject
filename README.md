@@ -5,9 +5,10 @@ dashboard with an Express gateway application and MongoDB persistence.
 
 ## Project Objective
 
-Build a management platform for configuring and operating a dynamic Layer 7 API gateway. Phases 1 through 6 are implemented: the gateway foundation, backend microservices, dynamic route
-management, per-route load balancing, backend health monitoring, and a React administrator
-dashboard.
+Build a management platform for configuring and operating a dynamic Layer 7 API gateway. Phases 1
+through 7 are implemented: gateway foundation, backend microservices, dynamic route management,
+load balancing, backend health monitoring, administrator dashboard, and database-backed gateway
+management and observability APIs.
 
 ## Technology Stack
 
@@ -83,6 +84,7 @@ dynamic-api-gateway/
 ├── database/
 ├── docs/
 │   ├── architecture.md
+│   ├── database.md
 │   ├── dynamic-routing.md
 │   ├── gateway.md
 │   ├── microservices.md
@@ -138,10 +140,11 @@ On macOS or Linux use `cp` instead of `copy`.
 | `MONGODB_URI` | `mongodb://127.0.0.1:27017/dynamic_api_gateway` | MongoDB connection string |
 | `FRONTEND_URL` | `http://localhost:5173` | Allowed CORS origin |
 | `USER_SERVICE_URL` | `http://localhost:5001` | Primary User Service target |
-| `USER_SERVICE_URL_2` | `http://localhost:5002` | Second User Service target, not routed yet |
+| `USER_SERVICE_URL_2` | `http://localhost:5002` | Second User Service backend target |
 | `PRODUCT_SERVICE_URL` | `http://localhost:5003` | Product Service target |
 | `ORDER_SERVICE_URL` | `http://localhost:5005` | Order Service target |
 | `PAYMENT_SERVICE_URL` | `http://localhost:5007` | Payment Service target |
+| `GATEWAY_PROXY_TIMEOUT_MS` | `10000` | Default timeout for upstream requests; can be changed through the configuration API |
 
 ### Frontend variables
 
@@ -268,6 +271,10 @@ transitions, and the Postman collection.
 | PATCH | `/api/gateway/routes/:id/toggle` | Enable or disable a route |
 | DELETE | `/api/gateway/routes/:id` | Delete a route |
 | POST | `/api/gateway/routes/refresh` | Reload routes from MongoDB |
+| GET | `/api/gateway/logs` | Filter and paginate persisted public proxy request logs |
+| GET | `/api/gateway/metrics` | Current-process public traffic metrics (resets on restart) |
+| GET | `/api/gateway/config` | Read effective runtime settings and persistence source |
+| PUT | `/api/gateway/config` | Persist and immediately apply supported timeout/health-check settings |
 
 ### Gateway Proxy Routes
 
@@ -479,14 +486,24 @@ Phase 6 is implemented:
 - Backend instance add/edit/enable/disable/remove workflows through route updates.
 - Per-route load-balancing configuration and latest gateway-reported backend eligibility.
 - Health monitoring view with gateway/database/registry status and backend health-check details.
-- Activity Logs navigation is intentionally unavailable: request logs are currently terminal-only
-  and there is no log retrieval API.
-- Dashboard implementation and workflows documented in [docs/dashboard.md](docs/dashboard.md).
+-   - Activity Logs page displays persisted, filtered request records; query values with sensitive key
+    names are redacted and headers/bodies are never stored.
+  - Overview reports process-local request totals, outcomes, status codes, and average latency.
+  - Gateway Settings reads and updates the supported persisted timeout and health-check controls.
+  - Dashboard implementation and workflows documented in [docs/dashboard.md](docs/dashboard.md).
 
-Not implemented yet:
+  Phase 7 is implemented:
 
-- Request-metric persistence and dashboard analytics.
-- Retries, circuit breaking, authentication, rate limiting, and service-to-service communication.
+  - MongoDB-backed request logs with bounded filters, pagination, request IDs, and sensitive query
+    redaction.
+  - In-memory current-process metrics, explicitly separate from historical request records.
+  - Persistent gateway timeout and health-check configuration with validated live application.
+  - Database and observability details documented in [docs/database.md](docs/database.md).
+
+  Not implemented:
+
+  - Historical/distributed metrics and log retention policies.
+  - Retries, circuit breaking, authentication, rate limiting, and service-to-service communication.
 
 Run gateway unit tests without MongoDB using `npm run test:unit` from the repository root. Run the
 MongoDB-backed suite with `GATEWAY_TEST_MONGODB_URI` set to a dedicated test server using

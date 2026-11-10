@@ -7,8 +7,12 @@ const mongoose = require('mongoose');
 const app = require('../src/app');
 const env = require('../src/config/env');
 const Route = require('../src/models/Route');
+const GatewayRequestLog = require('../src/models/GatewayRequestLog');
+const GatewayConfiguration = require('../src/models/GatewayConfiguration');
 const registry = require('../src/services/routeRegistry');
 const routeService = require('../src/services/routeService');
+const gatewayConfiguration = require('../src/services/gatewayConfiguration');
+const requestMetrics = require('../src/services/requestMetrics');
 const backendHealthMonitor = require('../src/services/backendHealthMonitor');
 const { connectDatabase } = require('../src/config/db');
 
@@ -52,7 +56,7 @@ test(
   { skip: mongoUri ? false : 'Set GATEWAY_TEST_MONGODB_URI to run isolated MongoDB integration tests' },
   async () => {
     const originalMongoUri = env.mongoUri;
-    const testDatabase = `gateway_phase5_test_${process.pid}_${Date.now()}`;
+    const testDatabase = `gateway_phase7_test_${process.pid}_${Date.now()}`;
     const parsedMongoUri = new URL(mongoUri);
     parsedMongoUri.pathname = `/${testDatabase}`;
     env.mongoUri = parsedMongoUri.toString();
@@ -60,10 +64,14 @@ test(
     let gateway;
     let upstreamOne;
     let upstreamTwo;
+    let upstreamFailure;
 
     try {
       assert.equal(await connectDatabase(), true);
       await mongoose.connection.dropDatabase();
+      await GatewayRequestLog.init();
+      await gatewayConfiguration.initialize();
+      requestMetrics.reset();
 
       const createUpstream = (name) =>
         http.createServer((req, res) => {
@@ -156,6 +164,111 @@ test(
       assert.equal((await proxied.json()).upstream, 'one');
       proxied = await fetch(`${baseUrl}/integration-runtime`);
       assert.equal((await proxied.json()).upstream, 'two');
+      proxied = await fetch(
+        `${baseUrl}/integration-runtime?access_token=must-not-be-saved&search=integration`
+      );
+      assert.equal(proxied.status, 200);
+      const requestId = proxied.headers.get('x-request-id');
+      assert.ok(requestId);
+
+      let loggedRequest;
+      for (let attempt = 0; attempt < 20 && !loggedRequest; attempt += 1) {
+        const logResult = await request(
+          baseUrl,
+          `/api/gateway/logs?requestId=${encodeURIComponent(requestId)}`
+        );
+        loggedRequest = logResult.data.data[0];
+        if (!loggedRequest) await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.ok(loggedRequest, 'completed proxied request should be persisted');
+      assert.equal(loggedRequest.statusCode, 200);
+      assert.equal(loggedRequest.success, true);
+      assert.ok(loggedRequest.durationMs >= 0);
+      assert.equal(loggedRequest.routeName, 'Integration Runtime Route');
+      assert.ok(loggedRequest.backendInstanceId);
+      assert.deepEqual(loggedRequest.query, [
+        { key: 'access_token', value: '[REDACTED]' },
+        { key: 'search', value: 'integration' },
+      ]);
+      assert.doesNotMatch(JSON.stringify(loggedRequest), /must-not-be-saved/);
+
+      const filteredLogs = await request(
+        baseUrl,
+        '/api/gateway/logs?method=GET&statusCode=200&success=true&route=Integration%20Runtime%20Route&limit=1'
+      );
+      assert.equal(filteredLogs.response.status, 200);
+      assert.equal(filteredLogs.data.pagination.limit, 1);
+      assert.ok(filteredLogs.data.pagination.total >= 1);
+      assert.equal(filteredLogs.data.data.length, 1);
+      const invalidLogs = await request(baseUrl, '/api/gateway/logs?page=0');
+      assert.equal(invalidLogs.response.status, 400);
+
+      const metrics = await request(baseUrl, '/api/gateway/metrics');
+      assert.equal(metrics.response.status, 200);
+      assert.equal(metrics.data.data.totalRequests, 3);
+      assert.equal(metrics.data.data.successfulRequests, 3);
+      assert.equal(metrics.data.data.byStatusCode['200'], 3);
+      assert.equal(metrics.data.data.byRoute[0].routeName, 'Integration Runtime Route');
+
+      upstreamFailure = http.createServer((req, res) => {
+        if (req.url === '/health') {
+          res.writeHead(200).end();
+          return;
+        }
+        res.end('ready');
+      });
+      const failurePort = await listen(upstreamFailure);
+      const failureRoute = await request(baseUrl, '/api/gateway/routes', {
+        method: 'POST',
+        body: {
+          name: 'Failure Logging Route',
+          path: '/failure-logging',
+          backends: [{ id: 'failure-backend', target: `http://127.0.0.1:${failurePort}` }],
+          methods: ['GET'],
+        },
+      });
+      assert.equal(failureRoute.response.status, 201);
+      await backendHealthMonitor.checkAll();
+      await close(upstreamFailure);
+      const failedProxy = await fetch(`${baseUrl}/failure-logging?password=redact-this`);
+      assert.equal(failedProxy.status, 502);
+      const failedRequestId = failedProxy.headers.get('x-request-id');
+      assert.ok(failedRequestId);
+      let failedLog;
+      for (let attempt = 0; attempt < 20 && !failedLog; attempt += 1) {
+        const logResult = await request(
+          baseUrl,
+          `/api/gateway/logs?requestId=${encodeURIComponent(failedRequestId)}`
+        );
+        failedLog = logResult.data.data[0];
+        if (!failedLog) await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.ok(failedLog, 'failed upstream request should be persisted');
+      assert.equal(failedLog.statusCode, 502);
+      assert.equal(failedLog.success, false);
+      assert.equal(failedLog.errorCategory, 'upstream_unavailable');
+      assert.deepEqual(failedLog.query, [{ key: 'password', value: '[REDACTED]' }]);
+      await request(baseUrl, `/api/gateway/routes/${failureRoute.data.data.id}`, {
+        method: 'DELETE',
+      });
+
+      const config = await request(baseUrl, '/api/gateway/config');
+      assert.equal(config.response.status, 200);
+      assert.equal(config.data.data.source, 'database');
+      const changedConfig = await request(baseUrl, '/api/gateway/config', {
+        method: 'PUT',
+        body: { proxyTimeoutMs: 12000, healthCheckIntervalMs: 6000 },
+      });
+      assert.equal(changedConfig.response.status, 200);
+      assert.equal(changedConfig.data.data.settings.proxyTimeoutMs, 12000);
+      assert.equal(require('../src/services/proxyService').getProxyTimeout(), 12000);
+      assert.equal(backendHealthMonitor.getConfiguration().intervalMs, 6000);
+      assert.equal((await GatewayConfiguration.findById('gateway').lean()).proxyTimeoutMs, 12000);
+      const invalidConfig = await request(baseUrl, '/api/gateway/config', {
+        method: 'PUT',
+        body: { proxyTimeoutMs: 1 },
+      });
+      assert.equal(invalidConfig.response.status, 400);
 
       result = await request(baseUrl, `/api/gateway/routes/${routeId}`, {
         method: 'PUT',
@@ -320,15 +433,31 @@ const registry = require('./src/services/routeRegistry');
       await mongoose.disconnect();
       result = await request(baseUrl, '/api/gateway/routes');
       assert.equal(result.response.status, 503);
+      result = await request(baseUrl, '/api/gateway/logs');
+      assert.equal(result.response.status, 503);
+      result = await request(baseUrl, '/api/gateway/config');
+      assert.equal(result.response.status, 200);
+      assert.equal(result.data.data.persistenceAvailable, false);
+      assert.equal(result.data.data.source, 'database_cache');
+      result = await request(baseUrl, '/api/gateway/config', {
+        method: 'PUT',
+        body: { proxyTimeoutMs: 15000 },
+      });
+      assert.equal(result.response.status, 503);
 
       result = await request(baseUrl, '/api/gateway/routes/refresh', { method: 'POST' });
       assert.equal(result.response.status, 200);
       assert.equal(registry.getStats().status, 'loaded');
       assert.equal(registry.getStats().totalRoutes, 4);
+      result = await request(baseUrl, '/api/gateway/config');
+      assert.equal(result.response.status, 200);
+      assert.equal(result.data.data.source, 'database');
+      assert.equal(result.data.data.settings.proxyTimeoutMs, 12000);
     } finally {
       await close(gateway);
       await close(upstreamOne);
       await close(upstreamTwo);
+      await close(upstreamFailure);
       if (mongoose.connection.readyState === 1) {
         await mongoose.connection.dropDatabase();
         await mongoose.disconnect();

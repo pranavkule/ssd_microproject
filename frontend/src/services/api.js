@@ -74,9 +74,35 @@ export const loadBalancingApi = {
   },
 };
 
+export const requestLogsApi = {
+  async list(params) {
+    const response = await api.get('/api/gateway/logs', { params });
+    return response.data;
+  },
+};
+
+export const metricsApi = {
+  async getMetrics(config) {
+    const response = await api.get('/api/gateway/metrics', config);
+    return response.data.data;
+  },
+};
+
+export const configurationApi = {
+  async getConfiguration(config) {
+    const response = await api.get('/api/gateway/config', config);
+    return response.data.data;
+  },
+  async updateConfiguration(settings) {
+    const response = await api.put('/api/gateway/config', settings);
+    return response.data.data;
+  },
+};
+
 export const gatewayApi = {
   ...healthApi,
   ...routesApi,
+  ...metricsApi,
 };
 
 export default api;

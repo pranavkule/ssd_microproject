@@ -18,7 +18,7 @@ function MetricCard({ label, value, detail, icon: Icon, tone = 'blue', loading }
 }
 
 function Overview() {
-  const { health, routes, loading, error, refresh, gatewayUnavailable } = useDashboard();
+  const { health, routes, metrics, loading, error, refresh, gatewayUnavailable } = useDashboard();
   const gatewayConnection = getGatewayConnectionState({ health, error, gatewayUnavailable });
   const backends = routes.flatMap((route) =>
     (route.backendInstances || []).map((backend) => ({ ...backend, route }))
@@ -44,6 +44,18 @@ function Overview() {
         <MetricCard label="Healthy backends" value={loadBalancing.healthyBackends ?? '—'} detail="Eligible when enabled" icon={CircleCheck} tone="green" loading={loading && !health} />
         <MetricCard label="Unhealthy backends" value={loadBalancing.unhealthyBackends ?? '—'} detail={`${loadBalancing.disabledBackends ?? 0} disabled`} icon={ShieldAlert} tone="orange" loading={loading && !health} />
       </div>
+
+      <Panel title="Gateway traffic" description="Current-process counts for proxied traffic; reset when the gateway restarts.">
+        <div className="metric-grid">
+          <MetricCard label="Requests received" value={metrics?.totalRequests ?? '—'} icon={Network} />
+          <MetricCard label="Successful requests" value={metrics?.successfulRequests ?? '—'} icon={CircleCheck} tone="green" />
+          <MetricCard label="Failed requests" value={metrics?.failedRequests ?? '—'} icon={ShieldAlert} tone="orange" />
+          <MetricCard label="Average response time" value={metrics ? `${metrics.averageResponseTimeMs} ms` : '—'} icon={Server} />
+        </div>
+        <p className="page-footnote">
+          HTTP status counts: {metrics ? Object.entries(metrics.byStatusCode).map(([status, count]) => `${status}: ${count}`).join(' · ') || 'No completed requests' : 'Metrics unavailable'}
+        </p>
+      </Panel>
 
       <div className="content-grid overview-grid">
         <Panel title="Backend health" description="Health monitor status for configured instances" action={<Link className="panel-link" to="/backends">All backends <ArrowUpRight size={14} /></Link>}>

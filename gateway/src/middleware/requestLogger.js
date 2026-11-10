@@ -1,4 +1,5 @@
 const { redactTarget } = require('../utils/routeValidation');
+const { getSafeRequestUrl } = require('../utils/requestLogSanitizer');
 
 function attachRequestLogging(req, res, route, backend) {
   res.locals.gatewayRoute = route;
@@ -8,7 +9,7 @@ function attachRequestLogging(req, res, route, backend) {
     const duration = Date.now() - res.locals.proxyStartedAt;
 
     console.log(
-      `[GATEWAY] ${new Date().toISOString()} ${req.method} ${req.originalUrl} -> ${route.name} | ${backend.id} (${redactTarget(backend.target)}) | ${route.loadBalancingStrategy} | ${res.statusCode} | ${duration}ms`
+      `[GATEWAY] ${new Date().toISOString()} ${req.method} ${getSafeRequestUrl(req.originalUrl)} -> ${route.name} | ${backend.id} (${redactTarget(backend.target)}) | ${route.loadBalancingStrategy} | ${res.statusCode} | ${duration}ms`
     );
   });
 }
