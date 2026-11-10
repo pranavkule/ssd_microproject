@@ -23,18 +23,20 @@ mongoose.connection.on('disconnected', () => {
 
 async function connectDatabase() {
   if (mongoose.connection.readyState === 1) {
-    return;
+    return true;
   }
 
   try {
     await mongoose.connect(env.mongoUri, {
       serverSelectionTimeoutMS: 5000,
     });
+    return true;
   } catch (error) {
     console.error(`[database] Unable to connect to MongoDB: ${error.message}`);
     console.error(
       '[database] The gateway remains available. Start MongoDB or set a valid MONGODB_URI.'
     );
+    return false;
   }
 }
 

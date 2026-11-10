@@ -1,17 +1,13 @@
 import { Link } from 'react-router-dom';
+import { ArrowLeft } from 'lucide-react';
 
 function NotFound() {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center text-center">
-      <p className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-400">404</p>
-      <h1 className="mt-4 text-3xl font-bold text-white">Page not found</h1>
-      <p className="mt-2 text-slate-400">This dashboard page does not exist yet.</p>
-      <Link
-        to="/"
-        className="mt-6 rounded-lg bg-sky-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-sky-400"
-      >
-        Back to home
-      </Link>
+    <div className="not-found-page">
+      <span className="eyebrow">404 · Route not found</span>
+      <h1>This page is not available</h1>
+      <p>The dashboard address may have changed, or the route may no longer exist.</p>
+      <Link to="/" className="button button-primary"><ArrowLeft size={15} />Back to overview</Link>
     </div>
   );
 }

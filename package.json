@@ -20,6 +20,10 @@
     "dev:order": "cross-env PORT=5005 npm run dev --workspace services/order-service",
     "dev:payment": "cross-env PORT=5007 npm run dev --workspace services/payment-service",
     "start:gateway": "npm run start --workspace gateway",
+    "test": "npm run test --workspace gateway",
+    "test:frontend": "npm run test --workspace frontend",
+    "test:unit": "npm run test:unit --workspace gateway",
+    "test:integration": "npm run test:integration --workspace gateway",
     "build:frontend": "npm run build --workspace frontend"
   },
   "devDependencies": {

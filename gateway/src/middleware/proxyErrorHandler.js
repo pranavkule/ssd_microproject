@@ -5,9 +5,10 @@ const TIMEOUT_ERROR_CODES = new Set([
   'ERR_SOCKET_CONNECTION_TIMEOUT',
 ]);
 
-function proxyErrorHandler(error, req, res, service, proxyTimeoutMs) {
+function proxyErrorHandler(error, req, res, route, proxyTimeoutMs) {
   const startedAt = res.locals.proxyStartedAt || Date.now();
   const duration = Date.now() - startedAt;
+  const routeName = route && route.name ? route.name : 'Unknown route';
   const timedOutReset =
     error.code === 'ECONNRESET' &&
     Number.isFinite(proxyTimeoutMs) &&
@@ -16,11 +17,11 @@ function proxyErrorHandler(error, req, res, service, proxyTimeoutMs) {
   const statusCode = isTimeout ? 504 : 502;
   const errorCode = isTimeout ? 'GATEWAY_TIMEOUT' : 'SERVICE_UNAVAILABLE';
   const message = isTimeout
-    ? `${service.label} timed out while processing the request`
-    : `${service.label} is currently unavailable`;
+    ? `${routeName} timed out while processing the request`
+    : `${routeName} is currently unavailable`;
 
   console.error(
-    `[GATEWAY] ${new Date().toISOString()} Proxy failure: ${req.method} ${req.originalUrl} -> ${service.name} | ${statusCode} | ${duration}ms | ${error.code || 'PROXY_ERROR'}`
+    `[GATEWAY] ${new Date().toISOString()} Proxy failure: ${req.method} ${req.originalUrl} -> ${routeName} | ${statusCode} | ${duration}ms | ${error.code || 'PROXY_ERROR'}`
   );
 
   if (res.headersSent || res.writableEnded) {
@@ -39,7 +40,8 @@ function proxyErrorHandler(error, req, res, service, proxyTimeoutMs) {
     success: false,
     error: errorCode,
     message,
-    service: service.name,
+    route: routeName,
+    service: routeName,
     timestamp: new Date().toISOString(),
   });
 }

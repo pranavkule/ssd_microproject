@@ -1,24 +1,18 @@
-const { findProxiedServiceByPath } = require('../config/services');
+const { redactTarget } = require('../utils/routeValidation');
 
-function requestLogger(req, res, next) {
-  const service = findProxiedServiceByPath(req.path);
-
-  if (!service) {
-    return next();
-  }
-
-  res.locals.proxyService = service;
+function attachRequestLogging(req, res, route, backend) {
+  res.locals.gatewayRoute = route;
   res.locals.proxyStartedAt = Date.now();
 
   res.on('finish', () => {
     const duration = Date.now() - res.locals.proxyStartedAt;
 
     console.log(
-      `[GATEWAY] ${new Date().toISOString()} ${req.method} ${req.originalUrl} -> ${service.name} | ${res.statusCode} | ${duration}ms`
+      `[GATEWAY] ${new Date().toISOString()} ${req.method} ${req.originalUrl} -> ${route.name} | ${backend.id} (${redactTarget(backend.target)}) | ${route.loadBalancingStrategy} | ${res.statusCode} | ${duration}ms`
     );
   });
-
-  next();
 }
 
-module.exports = requestLogger;
+module.exports = {
+  attachRequestLogging,
+};

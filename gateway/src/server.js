@@ -2,15 +2,49 @@ const mongoose = require('mongoose');
 const app = require('./app');
 const env = require('./config/env');
 const { connectDatabase } = require('./config/db');
+const routeRegistry = require('./services/routeRegistry');
+const routeService = require('./services/routeService');
+const backendHealthMonitor = require('./services/backendHealthMonitor');
 
-const server = app.listen(env.port, () => {
-  console.log(`[gateway] Dynamic L7 API Gateway running on http://localhost:${env.port}`);
-  console.log(`[gateway] Health endpoint: http://localhost:${env.port}/health`);
-  connectDatabase();
-});
+let server;
+
+async function startGateway() {
+  const connected = await connectDatabase();
+
+  if (!connected) {
+    routeRegistry.markInitializationFailure(
+      new Error('MongoDB was unavailable during gateway startup')
+    );
+  } else {
+    try {
+      await routeService.initializeRouteSystem();
+    } catch (error) {
+      console.error(
+        '[ROUTES] Gateway started without a loaded route registry. Use POST /api/gateway/routes/refresh after MongoDB is available.'
+      );
+    }
+  }
+
+  await backendHealthMonitor.start(routeRegistry.getRoutes());
+
+  server = app.listen(env.port, () => {
+    console.log(
+      `[gateway] Dynamic L7 API Gateway running on http://localhost:${env.port}`
+    );
+    console.log(
+      `[gateway] Health endpoint: http://localhost:${env.port}/health`
+    );
+  });
+}
 
 function shutdown(signal) {
   console.log(`[gateway] Received ${signal}. Shutting down...`);
+  backendHealthMonitor.stop();
+
+  if (!server) {
+    process.exit(0);
+    return;
+  }
 
   server.close(async () => {
     try {
@@ -32,4 +66,12 @@ process.on('unhandledRejection', (reason) => {
 
 process.on('uncaughtException', (error) => {
   console.error('[gateway] Uncaught exception:', error);
+});
+
+startGateway().catch((error) => {
+  console.error('[gateway] Failed to start gateway:', error);
+
+  if (!server) {
+    server = app.listen(env.port);
+  }
 });

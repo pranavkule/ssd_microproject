@@ -1,8 +1,13 @@
 const env = require('../config/env');
 const { getDatabaseStatus } = require('../config/db');
-const { getServiceSummaries } = require('../config/services');
+const routeRegistry = require('../services/routeRegistry');
+const backendHealthMonitor = require('../services/backendHealthMonitor');
+const { redactTarget } = require('../utils/routeValidation');
 
 function getHealth(req, res) {
+  const routes = routeRegistry.getRoutes();
+  const registry = routeRegistry.getStats();
+
   res.status(200).json({
     application: 'Dynamic L7 API Gateway',
     status: 'running',
@@ -10,7 +15,33 @@ function getHealth(req, res) {
     timestamp: new Date().toISOString(),
     uptimeSeconds: Math.floor(process.uptime()),
     database: getDatabaseStatus(),
-    services: getServiceSummaries(),
+    routeRegistry: registry,
+    loadBalancing: {
+      totalBackends: registry.totalBackends,
+      healthyBackends: registry.healthyBackends,
+      unhealthyBackends: registry.unhealthyBackends,
+      disabledBackends: registry.disabledBackends,
+    },
+    routes: routes.map((route) => ({
+      name: route.name,
+      id: route._id,
+      pathPrefix: route.path,
+      enabled: route.enabled,
+      loadBalancingStrategy: route.loadBalancingStrategy,
+      backends: route.backendInstances.map((backend) => ({
+        id: backend.id,
+        target: redactTarget(backend.target),
+        enabled: route.enabled && backend.enabled,
+        weight: backend.weight || null,
+        health: backendHealthMonitor.getBackendHealth(route, backend),
+      })),
+    })),
+    services: routes.map((route) => ({
+      name: route.name,
+      url: redactTarget(route.target),
+      pathPrefix: route.path,
+      routingEnabled: route.enabled,
+    })),
   });
 }
 

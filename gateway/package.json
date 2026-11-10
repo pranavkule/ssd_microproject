@@ -6,7 +6,10 @@
   "main": "src/server.js",
   "scripts": {
     "dev": "nodemon src/server.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "test:unit": "node --test test/routeValidation.test.js test/routeRegistry.test.js test/loadBalancer.test.js test/backendHealthMonitor.test.js test/proxy.test.js test/startup.test.js",
+    "test:integration": "node --test test/integration.test.js",
+    "test": "npm run test:unit && npm run test:integration"
   },
   "dependencies": {
     "cors": "^2.8.6",

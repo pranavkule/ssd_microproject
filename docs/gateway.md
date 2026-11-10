@@ -2,28 +2,50 @@
 
 ## Overview
 
-Phase 3 turns the Express application on port `8000` into a working Layer 7 reverse proxy. Client
-requests sent to the gateway under a registered API prefix are forwarded to the corresponding
-backend microservice. The gateway preserves the request method, path, query string, body, and
-headers, and returns the backend response without rewriting successful or validation-error payloads.
+The Express gateway on port `8000` is a Layer 7 reverse proxy with a MongoDB-backed dynamic route
+registry. Routes are persisted in the `routes` collection and can be managed at runtime through
+`/api/gateway/routes`. The gateway keeps an immutable in-memory snapshot of the active routes, so
+proxied requests do not query MongoDB for routing decisions.
 
-The proxy configuration is static for this phase. It is defined in
-`gateway/src/config/services.js` from environment variables with local defaults.
+Phase 4 replaces the static prefix table used in Phase 3. The four default service routes are seeded
+on first startup, but administrators can create new routes, change targets, disable routes, and
+delete routes without restarting the gateway. Phase 5 extends routes to multiple backend instances
+and adds health-aware load balancing.
 
-## Routing Table
+See [dynamic-routing.md](dynamic-routing.md) for the route model, management API reference, matching
+rules, and detailed verification results.
 
-| Gateway path | Upstream service | Upstream URL | Status |
+## Middleware Order
+
+The order is important for both body streaming and path isolation:
+
+1. CORS.
+2. Route management router at `/api/gateway/routes` with a scoped `express.json()` parser.
+3. `/health` management endpoint.
+4. Dynamic proxy router.
+5. Gateway 404 handler.
+6. Centralized error handler.
+
+Management and health endpoints are registered before the dynamic proxy, so a route path cannot
+intercept them. The proxy is registered before any global body parser; request bodies are streamed
+to the selected backend instead of being consumed by the gateway.
+
+## Default Routing Table
+
+| Gateway path | Upstream service | Upstream URL | Methods |
 | --- | --- | --- | --- |
-| `/api/users` and `/api/users/*` | User Service | `http://localhost:5001` | Routed |
-| `/api/products` and `/api/products/*` | Product Service | `http://localhost:5003` | Routed |
-| `/api/orders` and `/api/orders/*` | Order Service | `http://localhost:5005` | Routed |
-| `/api/payments` and `/api/payments/*` | Payment Service | `http://localhost:5007` | Routed |
-| `/api/users` (future instance) | User Service instance 2 | `http://localhost:5002` | Configured, not routed |
+| `/api/users` and `/api/users/*` | User Service | `http://localhost:5001`, `http://localhost:5002` | `GET, HEAD, POST, PUT, DELETE` |
+| `/api/products` and `/api/products/*` | Product Service | `http://localhost:5003` | `GET, HEAD, POST, PUT, DELETE` |
+| `/api/orders` and `/api/orders/*` | Order Service | `http://localhost:5005` | `GET, POST, PATCH, DELETE` |
+| `/api/payments` and `/api/payments/*` | Payment Service | `http://localhost:5007` | `GET, POST` |
 | `/health` | Gateway | Local handler | Management endpoint |
-| Any other path | Gateway | None | Gateway 404 |
+| `/api/gateway/routes` | Gateway route management API | Local handler | Management endpoints |
+| Any other path | None | None | Structured gateway `404` |
 
-Prefix matching respects path boundaries. `/api/users` and `/api/users/123` are proxied, while
-`/api/users-extra` is not. Paths and query strings are not rewritten:
+Prefix matching respects path boundaries. `/api/users` and `/api/users/123` match the User Service
+route, while `/api/users-extra` does not. When multiple routes match, the longest path wins.
+
+Default routes preserve paths and query strings because `stripPrefix` is `false`:
 
 ```text
 GET http://localhost:8000/api/users?page=1&limit=5
@@ -40,14 +62,19 @@ Copy `gateway/.env.example` to `gateway/.env` and adjust values if needed.
 | `NODE_ENV` | `development` | Runtime environment |
 | `MONGODB_URI` | `mongodb://127.0.0.1:27017/dynamic_api_gateway` | Gateway database connection |
 | `FRONTEND_URL` | `http://localhost:5173` | Allowed CORS origin |
-| `USER_SERVICE_URL` | `http://localhost:5001` | Primary User Service target |
-| `USER_SERVICE_URL_2` | `http://localhost:5002` | Second User Service target, reserved for load balancing |
-| `PRODUCT_SERVICE_URL` | `http://localhost:5003` | Product Service target |
-| `ORDER_SERVICE_URL` | `http://localhost:5005` | Order Service target |
-| `PAYMENT_SERVICE_URL` | `http://localhost:5007` | Payment Service target |
+| `USER_SERVICE_URL` | `http://localhost:5001` | Default User Service route target |
+| `USER_SERVICE_URL_2` | `http://localhost:5002` | Second backend instance for the default User Service route |
+| `PRODUCT_SERVICE_URL` | `http://localhost:5003` | Default Product Service route target |
+| `ORDER_SERVICE_URL` | `http://localhost:5005` | Default Order Service route target |
+| `PAYMENT_SERVICE_URL` | `http://localhost:5007` | Default Payment Service route target |
+| `BACKEND_HEALTH_CHECK_PATH` | `/health` | Default health-check path requested on each backend |
+| `BACKEND_HEALTH_CHECK_INTERVAL_MS` | `5000` | Delay between periodic backend health checks |
+| `BACKEND_HEALTH_CHECK_TIMEOUT_MS` | `1500` | Timeout for one backend health check |
+| `BACKEND_HEALTH_CHECK_FAILURE_THRESHOLD` | `2` | Consecutive failures before a backend becomes unhealthy |
+| `BACKEND_HEALTH_CHECK_RECOVERY_THRESHOLD` | `1` | Consecutive successes before an unhealthy backend recovers |
 
-The second User Service instance is present in the registry and visible in `/health`, but it does
-not receive traffic in Phase 3.
+Service URL variables are used only when seeding missing default routes. Once a route exists, its
+persisted target is authoritative and is changed through the management API.
 
 ## Running
 
@@ -68,9 +95,49 @@ npm run dev:all        # frontend, gateway, services, and both User Service inst
 `npm run dev` starts only the frontend and gateway. The proxy routes require the backend services
 to be running separately.
 
+On startup the gateway connects to MongoDB, creates missing default routes, loads the registry, and
+then begins listening. If MongoDB is unavailable, the gateway still starts and reports a registry
+error instead of crashing.
+
+## Management API
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/gateway/routes` | List routes and registry statistics |
+| `GET` | `/api/gateway/routes/:id` | Get a route |
+| `POST` | `/api/gateway/routes` | Create a route |
+| `PUT` | `/api/gateway/routes/:id` | Update route fields |
+| `PATCH` | `/api/gateway/routes/:id/toggle` | Toggle or explicitly set enabled state |
+| `DELETE` | `/api/gateway/routes/:id` | Delete a route |
+| `POST` | `/api/gateway/routes/refresh` | Reload routes from MongoDB |
+
+Create a route:
+
+```bash
+curl -X POST http://localhost:8000/api/gateway/routes \
+  -H "Content-Type: application/json" \
+  -d "{\"name\":\"Catalog API\",\"path\":\"/catalog\",\"target\":\"http://localhost:5010\",\"methods\":[\"GET\",\"POST\"],\"stripPrefix\":false}"
+```
+
+Change its target:
+
+```bash
+curl -X PUT http://localhost:8000/api/gateway/routes/ROUTE_ID \
+  -H "Content-Type: application/json" \
+  -d "{\"target\":\"http://localhost:5011\"}"
+```
+
+Disable it:
+
+```bash
+curl -X PATCH http://localhost:8000/api/gateway/routes/ROUTE_ID/toggle \
+  -H "Content-Type: application/json" \
+  -d "{\"enabled\":false}"
+```
+
 ## Proxy Usage
 
-List records through the gateway:
+List records through the default routes:
 
 ```bash
 curl http://localhost:8000/api/users?page=1&limit=5
@@ -87,14 +154,6 @@ curl -X POST http://localhost:8000/api/users \
   -d "{\"name\":\"Asha Patel\",\"email\":\"asha@example.com\",\"role\":\"user\"}"
 ```
 
-Create an order through the gateway:
-
-```bash
-curl -X POST http://localhost:8000/api/orders \
-  -H "Content-Type: application/json" \
-  -d "{\"userId\":\"USER_ID\",\"items\":[{\"productId\":\"PRODUCT_ID\",\"quantity\":2,\"price\":109.5}]}"
-```
-
 Update an order status:
 
 ```bash
@@ -103,26 +162,35 @@ curl -X PATCH http://localhost:8000/api/orders/ORDER_ID/status \
   -d "{\"status\":\"confirmed\"}"
 ```
 
-Delete a product:
+The gateway forwards configured `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, and `OPTIONS`
+requests. Default routes include `HEAD` wherever their backend supports `GET`; the response has no
+body, as required for HEAD. It does not transform request or response bodies.
 
-```bash
-curl -X DELETE http://localhost:8000/api/products/PRODUCT_ID
-```
-
-The gateway forwards `GET`, `POST`, `PUT`, `PATCH`, and `DELETE` requests. It does not transform
-request or response bodies.
+Browser CORS preflight requests (an `OPTIONS` request containing `Origin` and
+`Access-Control-Request-Method`) are handled by the gateway's CORS middleware and are not forwarded
+upstream. An explicit upstream `OPTIONS` request is forwarded when the route allows `OPTIONS` and
+the request is not a browser preflight.
 
 ## Request Flow
 
-1. CORS middleware applies the configured frontend origin.
-2. The request logger identifies the target service and records the start time.
-3. The proxy router matches the path prefix and forwards the request to the service.
-4. Unmatched requests fall through to gateway JSON parsing, `/health`, and the gateway 404 handler.
-5. When the backend responds, the status, headers, and body are sent back through the gateway.
-6. A completion log records the method, path, service, status, and duration.
+1. CORS middleware handles browser preflight before proxy matching and applies the configured
+   frontend origin.
+2. Management and health paths are handled before the proxy.
+3. The dynamic proxy router finds the longest active route prefix.
+4. A method mismatch returns `405` with an `Allow` header.
+5. A matching request records the route name and start time, then streams to the route target.
+6. The target's status, headers, and body are returned through the gateway.
+7. A completion log records the method, path, route name, status, and duration.
 
-Proxy routing is registered before `express.json()` so request bodies are streamed to the backend
-instead of being consumed by the gateway. This is required for `POST`, `PUT`, and `PATCH` forwarding.
+Paths and query strings are preserved unless the route has `stripPrefix: true`. With
+`stripPrefix: true`, the matched route path is removed and the target pathname is retained:
+
+```text
+Route path:    /public/users
+Target:        http://localhost:5001/api/users
+Request:       /public/users/123?active=true
+Forwarded URL: http://localhost:5001/api/users/123?active=true
+```
 
 ## Successful Response Handling
 
@@ -133,12 +201,12 @@ payload as a direct service call.
 Example proxy request log:
 
 ```text
-[GATEWAY] 2026-11-10T05:38:45.355Z GET /api/users -> user-service | 200 | 16ms
+[GATEWAY] 2026-11-10T05:38:45.355Z GET /api/users -> User Service | 200 | 16ms
 ```
 
 ## Failure Handling
 
-If a service cannot be reached, the gateway returns a structured gateway error instead of crashing.
+If a service cannot be reached, the gateway returns a structured error instead of crashing.
 
 Connection failure example:
 
@@ -146,8 +214,9 @@ Connection failure example:
 {
   "success": false,
   "error": "SERVICE_UNAVAILABLE",
-  "message": "User service is currently unavailable",
-  "service": "user-service",
+  "message": "Catalog API is currently unavailable",
+  "route": "Catalog API",
+  "service": "Catalog API",
   "timestamp": "2026-11-10T05:38:45.355Z"
 }
 ```
@@ -156,6 +225,8 @@ Status codes:
 
 | Condition | Gateway status | Error code |
 | --- | --- | --- |
+| No active route matches | `404 Not Found` | `ROUTE_NOT_FOUND` |
+| Path matches but the method is not allowed | `405 Method Not Allowed` | `METHOD_NOT_ALLOWED` |
 | Connection refused, DNS failure, or early connection reset | `502 Bad Gateway` | `SERVICE_UNAVAILABLE` |
 | Upstream request exceeds the 10 second proxy timeout | `504 Gateway Timeout` | `GATEWAY_TIMEOUT` |
 
@@ -165,8 +236,9 @@ A timeout example:
 {
   "success": false,
   "error": "GATEWAY_TIMEOUT",
-  "message": "Product service timed out while processing the request",
-  "service": "product-service",
+  "message": "Product Service timed out while processing the request",
+  "route": "Product Service",
+  "service": "Product Service",
   "timestamp": "2026-11-10T05:38:36.617Z"
 }
 ```
@@ -178,10 +250,30 @@ A stopped backend does not stop the gateway. `/health` remains available, and re
 after the backend restarts. If a backend response has already started, the gateway ends the response
 rather than attempting to send a second JSON payload.
 
+## Database Failure Behavior
+
+The registry has three failure cases:
+
+- **MongoDB unavailable at startup:** the gateway starts, `routeRegistry.status` is `error`, the
+  registry is empty, management endpoints return `503 SERVICE_UNAVAILABLE`, and unmatched proxy
+  requests return `404`.
+- **MongoDB lost after a successful load:** the previous route snapshot stays active, so proxied
+  requests continue to work. Management endpoints return `503`, and health reports
+  `stale: true` after the failure is observed.
+- **MongoDB recovers:** call `POST /api/gateway/routes/refresh` to reload the registry and clear the
+  stale state. If the registry was never loaded, refresh also seeds missing defaults.
+
+If a management write succeeds in MongoDB but the in-memory snapshot cannot be updated, the gateway
+attempts a full reload and returns a recovery message when it cannot recover.
+
 ## Health Reporting
 
-`GET /health` reports the gateway, database, and configured service registry. It does not poll the
-backend services.
+`GET /health` reports the gateway, database, dynamic route registry, and current route/backend
+health. Its service list and per-route backend list are derived from the current route snapshot
+(including disabled routes), so deletion and updates cannot leave stale service entries. The
+`loadBalancing` section includes configured, disabled, healthy, and unhealthy backend counts.
+Backend credentials are redacted. Health checks run in the background and do not block
+proxy request handling.
 
 ```json
 {
@@ -195,74 +287,85 @@ backend services.
     "readyState": 1,
     "name": "dynamic_api_gateway"
   },
+  "routeRegistry": {
+    "status": "loaded",
+    "totalRoutes": 4,
+    "enabledRoutes": 4,
+    "disabledRoutes": 0,
+    "lastLoadedAt": "2026-11-10T05:38:40.000Z",
+    "lastError": null,
+    "stale": false
+  },
+  "loadBalancing": {
+    "totalBackends": 5,
+    "disabledBackends": 0,
+    "healthyBackends": 5,
+    "unhealthyBackends": 0
+  },
   "services": [
     {
       "name": "user-service",
       "url": "http://localhost:5001",
       "pathPrefix": "/api/users",
       "routingEnabled": true
-    },
-    {
-      "name": "user-service-2",
-      "url": "http://localhost:5002",
-      "pathPrefix": "/api/users",
-      "routingEnabled": false
-    },
-    {
-      "name": "product-service",
-      "url": "http://localhost:5003",
-      "pathPrefix": "/api/products",
-      "routingEnabled": true
-    },
-    {
-      "name": "order-service",
-      "url": "http://localhost:5005",
-      "pathPrefix": "/api/orders",
-      "routingEnabled": true
-    },
-    {
-      "name": "payment-service",
-      "url": "http://localhost:5007",
-      "pathPrefix": "/api/payments",
-      "routingEnabled": true
     }
   ]
 }
 ```
 
+The response also includes `routes`, with each configured backend's health state and the route's
+load-balancing strategy.
+
 ## Logging
+
+Registry changes are logged to stdout:
+
+```text
+[ROUTES] Initialized default route: User Service
+[ROUTES] Default route initialization complete: 4 created, 0 existing
+[ROUTES] Registry loaded: 4 routes (4 enabled)
+[ROUTES] Created route: Catalog API
+[ROUTES] Updated route: Catalog API
+[ROUTES] Disabled route: Catalog API
+[ROUTES] Deleted route: Catalog API
+[ROUTES] Registry refreshed successfully
+```
 
 Successful and completed proxy requests are logged to stdout:
 
 ```text
-[GATEWAY] <timestamp> <METHOD> <originalUrl> -> <service-name> | <status> | <duration>ms
+[GATEWAY] <timestamp> <METHOD> <originalUrl> -> <route-name> | <status> | <duration>ms
 ```
 
 Proxy failures are logged to stderr with the failure cause:
 
 ```text
-[GATEWAY] 2026-11-10T05:38:45.355Z Proxy failure: GET /api/users -> user-service | 502 | 2ms | ECONNREFUSED
+[GATEWAY] 2026-11-10T05:38:45.355Z Proxy failure: GET /api/users -> User Service | 502 | 2ms | ECONNREFUSED
 ```
 
 Query strings are included in the logged request URL. Request headers and bodies are not logged.
 
-## Phase 3 Limitations
+## Phase 5 Limitations
 
 The following are intentionally not implemented yet:
 
-- Dynamic route creation or editing through the management API or dashboard.
-- Load balancing across User Service instances.
-- Retries, circuit breaking, or health-aware target selection.
+- Retries and circuit breaking.
 - Authentication, API keys, rate limiting, and access policies.
-- Gateway route and request-metric persistence.
-- WebSocket proxying and streaming-specific configuration.
+- Dashboard route-management screens and analytics.
+- Request metric persistence, WebSocket proxying, and streaming-specific configuration.
+- The optional backend `weight` value is configuration metadata; Round Robin, Least Connections,
+  and Random do not use weighted selection.
 
-## Verification
+## Tests
 
-Phase 3 was tested through port `8000` with live services:
+Run unit, validation, registry, and live local proxy tests without MongoDB using
+`npm run test:unit` from the repository root. Run the separate MongoDB-backed management,
+persistence, seeding, and recovery test with `GATEWAY_TEST_MONGODB_URI` set to a reachable MongoDB
+server (`npm run test:integration`). The integration suite creates and drops a unique test database;
+without the variable the integration test is skipped.
 
-- `57` proxy checks passed for health metadata, method forwarding, body forwarding, query
-  preservation, backend success and error forwarding, prefix boundaries, 502 handling, recovery after
-  restart, deletes, and request logging.
-- A hanging upstream returned `504 GATEWAY_TIMEOUT` after the configured timeout.
-- Test records were removed after the run.
+The test suite uses Node's built-in test runner. Check its output for the actual pass, failure, and
+skip counts for the current run.
+
+The integration suite requires a reachable MongoDB server and creates/drops a unique database; do
+not point `GATEWAY_TEST_MONGODB_URI` at a database containing user data.

@@ -43,18 +43,6 @@ const serviceRegistry = Object.freeze({
   }),
 });
 
-const proxiedServices = Object.freeze(
-  Object.values(serviceRegistry).filter((service) => service.routingEnabled)
-);
-
-function pathMatchesPrefix(pathname, prefix) {
-  return pathname === prefix || pathname.startsWith(`${prefix}/`);
-}
-
-function findProxiedServiceByPath(pathname) {
-  return proxiedServices.find((service) => pathMatchesPrefix(pathname, service.pathPrefix));
-}
-
 function getServiceSummaries() {
   return Object.values(serviceRegistry).map((service) => ({
     name: service.name,
@@ -66,8 +54,5 @@ function getServiceSummaries() {
 
 module.exports = {
   serviceRegistry,
-  proxiedServices,
-  pathMatchesPrefix,
-  findProxiedServiceByPath,
   getServiceSummaries,
 };

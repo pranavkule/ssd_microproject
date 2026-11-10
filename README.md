@@ -5,10 +5,9 @@ dashboard with an Express gateway application and MongoDB persistence.
 
 ## Project Objective
 
-Build a management platform for configuring and operating a dynamic Layer 7 API gateway. The final
-system will support dynamic routing, reverse proxying, load balancing, and monitoring for
-independent backend microservices. Phases 1 through 3 are currently implemented: the gateway
-foundation, dashboard shell, four backend microservices, and static reverse proxy routing.
+Build a management platform for configuring and operating a dynamic Layer 7 API gateway. Phases 1 through 6 are implemented: the gateway foundation, backend microservices, dynamic route
+management, per-route load balancing, backend health monitoring, and a React administrator
+dashboard.
 
 ## Technology Stack
 
@@ -84,6 +83,7 @@ dynamic-api-gateway/
 ├── database/
 ├── docs/
 │   ├── architecture.md
+│   ├── dynamic-routing.md
 │   ├── gateway.md
 │   ├── microservices.md
 │   └── postman/
@@ -185,11 +185,13 @@ New-Item -ItemType Directory -Path "C:\data\db" -Force
 
 Adjust the version in the path to match your installation.
 
-The `dynamic_api_gateway` database is created automatically when data is first written. Phase 2
-services store records in the `users`, `products`, `orders`, and `payments` collections.
+The `dynamic_api_gateway` database is created automatically when data is first written. The gateway
+stores route definitions in the `routes` collection. Phase 2 services store records in the `users`,
+`products`, `orders`, and `payments` collections.
 
 If MongoDB is unavailable, the gateway still starts and `/health` reports
-`database.status: "disconnected"`. The gateway logs the connection error and does not crash.
+`database.status: "disconnected"` and `routeRegistry.status: "error"`. Management route endpoints
+return `503`; the gateway logs the connection error and does not crash.
 
 ## Running the Project
 
@@ -205,6 +207,11 @@ npm run dev
 `npm run dev` starts the dashboard and gateway only. Start the microservices with
 `npm run dev:services` in another terminal before using the proxy routes, or use `npm run dev:all`
 for the full stack.
+
+The dashboard defaults to `http://localhost:8000` as its gateway API. Set
+`VITE_GATEWAY_BASE_URL` in `frontend/.env` to override it; `VITE_API_BASE_URL` remains supported as
+a compatibility alias. See [docs/dashboard.md](docs/dashboard.md) for dashboard workflows and API
+behavior.
 
 ### Start individually
 
@@ -253,19 +260,52 @@ transitions, and the Postman collection.
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
-| GET | `/health` | Gateway status, timestamp, uptime, MongoDB state, and configured services |
+| GET | `/health` | Gateway status, timestamp, uptime, MongoDB state, dynamic route registry, and configured routes |
+| GET | `/api/gateway/routes` | List all dynamic routes and registry statistics |
+| POST | `/api/gateway/routes` | Create a route |
+| GET | `/api/gateway/routes/:id` | Get one route |
+| PUT | `/api/gateway/routes/:id` | Update route fields |
+| PATCH | `/api/gateway/routes/:id/toggle` | Enable or disable a route |
+| DELETE | `/api/gateway/routes/:id` | Delete a route |
+| POST | `/api/gateway/routes/refresh` | Reload routes from MongoDB |
 
 ### Gateway Proxy Routes
 
-| Gateway prefix | Upstream target |
-| --- | --- |
-| `/api/users` | `http://localhost:5001` |
-| `/api/products` | `http://localhost:5003` |
-| `/api/orders` | `http://localhost:5005` |
-| `/api/payments` | `http://localhost:5007` |
+Routes are stored in MongoDB and can be changed at runtime. The gateway seeds these default routes
+when they are missing:
 
-The gateway forwards `GET`, `POST`, `PUT`, `PATCH`, and `DELETE`, preserving paths, query strings,
-request bodies, response status codes, and response payloads. For example:
+| Gateway prefix | Default target | Methods |
+| --- | --- | --- |
+| `/api/users` | `http://localhost:5001` | `GET, HEAD, POST, PUT, DELETE` |
+| `/api/products` | `http://localhost:5003` | `GET, HEAD, POST, PUT, DELETE` |
+| `/api/orders` | `http://localhost:5005` | `GET, HEAD, POST, PATCH, DELETE` |
+| `/api/payments` | `http://localhost:5007` | `GET, HEAD, POST` |
+
+Browser CORS preflight requests are answered by the gateway and are not sent upstream. An explicit
+`OPTIONS` request without preflight headers is proxied only when `OPTIONS` is enabled on that route.
+Default routes include `HEAD`, and HEAD responses contain no body.
+
+### Tests
+
+Run the unit and proxy tests without MongoDB:
+
+```bash
+npm run test:unit
+```
+
+Run the MongoDB-backed management and persistence tests against a dedicated test database by setting
+`GATEWAY_TEST_MONGODB_URI` first. The integration suite uses a unique database name and drops it
+afterward. Without this variable, the integration test is reported as skipped.
+
+```powershell
+$env:GATEWAY_TEST_MONGODB_URI = "mongodb://127.0.0.1:27017"
+npm run test:integration
+```
+
+Run both suites with `npm test`.
+
+The gateway forwards all allowed methods, preserving paths, query strings, request bodies, response
+status codes, and response payloads. For example:
 
 ```bash
 curl http://localhost:8000/api/users?page=1&limit=5
@@ -273,9 +313,20 @@ curl http://localhost:8000/api/users?page=1&limit=5
 
 Backend validation responses such as `400`, `404`, and `409` are returned unchanged. Unreachable
 services return `502`, and upstream timeouts return `504`, with structured JSON gateway errors.
+Unmatched paths return `404`; a path match with a disallowed method returns `405` and an `Allow`
+header.
 
-See [docs/gateway.md](docs/gateway.md) for routing details, failure responses, logging, and curl
-examples.
+Create a route with a runtime target:
+
+```bash
+curl -X POST http://localhost:8000/api/gateway/routes \
+  -H "Content-Type: application/json" \
+  -d "{\"name\":\"Catalog API\",\"path\":\"/catalog\",\"target\":\"http://localhost:5010\",\"methods\":[\"GET\",\"POST\"]}"
+```
+
+See [docs/gateway.md](docs/gateway.md) for proxy behavior and
+[docs/dynamic-routing.md](docs/dynamic-routing.md) for the full route model, management API,
+matching rules, and failure recovery.
 
 ### Microservices
 
@@ -293,7 +344,7 @@ Gateway health example:
 curl http://localhost:8000/health
 ```
 
-Example response:
+Example response (timestamps and backend health vary at runtime):
 
 ```json
 {
@@ -307,33 +358,42 @@ Example response:
     "readyState": 1,
     "name": "dynamic_api_gateway"
   },
+  "routeRegistry": {
+    "status": "loaded",
+    "totalRoutes": 4,
+    "enabledRoutes": 4,
+    "disabledRoutes": 0,
+    "lastLoadedAt": "2026-11-10T10:00:00.000Z",
+    "lastError": null,
+    "stale": false
+  },
+  "loadBalancing": {
+    "totalBackends": 5,
+    "disabledBackends": 0,
+    "healthyBackends": 5,
+    "unhealthyBackends": 0
+  },
   "services": [
     {
-      "name": "user-service",
+      "name": "User Service",
       "url": "http://localhost:5001",
       "pathPrefix": "/api/users",
       "routingEnabled": true
     },
     {
-      "name": "user-service-2",
-      "url": "http://localhost:5002",
-      "pathPrefix": "/api/users",
-      "routingEnabled": false
-    },
-    {
-      "name": "product-service",
+      "name": "Product Service",
       "url": "http://localhost:5003",
       "pathPrefix": "/api/products",
       "routingEnabled": true
     },
     {
-      "name": "order-service",
+      "name": "Order Service",
       "url": "http://localhost:5005",
       "pathPrefix": "/api/orders",
       "routingEnabled": true
     },
     {
-      "name": "payment-service",
+      "name": "Payment Service",
       "url": "http://localhost:5007",
       "pathPrefix": "/api/payments",
       "routingEnabled": true
@@ -342,17 +402,16 @@ Example response:
 }
 ```
 
-Unknown gateway paths return HTTP 404 with a JSON error payload.
-
-The second User Service instance is configured and reported by `/health`, but it does not receive
-traffic in Phase 3.
+`/health` also includes a `routes` array with each route's strategy and backend health status.
+Unknown gateway paths return HTTP 404 with a JSON error payload. The default User Service route
+balances across instances on ports `5001` and `5002`.
 
 ## Current Implementation Status
 
 Phase 1 is implemented:
 
 - Vite React application with Tailwind CSS and React Router.
-- Placeholder dashboard home page and 404 page.
+- React dashboard application shell, routing, and Axios client foundation.
 - Axios client configured through `VITE_API_BASE_URL`.
 - Express gateway with JSON parsing, CORS, dotenv, modular `app.js` and `server.js`.
 - `GET /health` endpoint with separate MongoDB status.
@@ -374,20 +433,64 @@ Phase 2 is implemented:
 
 Phase 3 is implemented:
 
-- Static reverse proxy routing from the gateway to all four microservices.
+- Static reverse proxy routing to the four microservices.
 - Path-prefix matching that preserves full request paths and query strings.
-- Forwarding for `GET`, `POST`, `PUT`, `PATCH`, and `DELETE`, including request and response bodies.
+- Forwarding for configured `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, and `OPTIONS` methods,
+  including request and response bodies.
 - Centralized expression of service targets through environment variables.
-- User Service instance 2 configured in the service registry but not routed yet.
 - Structured `502` responses for unavailable services and `504` responses for upstream timeouts.
 - Proxy request completion and failure logs with service name, status, and duration.
-- Extended `/health` reporting for the configured service registry without active backend polling.
 - Gateway documentation in [docs/gateway.md](docs/gateway.md).
+
+Phase 4 is implemented:
+
+- MongoDB `Route` model with unique names and paths, allowed methods, descriptions, enabled state,
+  and `stripPrefix` configuration.
+- Idempotent startup seeding for the four default service routes without overwriting admin changes.
+- Immutable in-memory registry loaded before the gateway starts accepting traffic.
+- Route management API for listing, creating, reading, updating, toggling, deleting, and refreshing
+  routes.
+- Dynamic longest-prefix matching with path-boundary safety.
+- Per-route method enforcement with `405` and an `Allow` header.
+- Structured `404` for unmatched or disabled routes.
+- Runtime target changes and route changes without restarting the gateway.
+- Optional `stripPrefix` path rewriting with target pathname retention.
+- Registry health reporting through `/health`, including stale state and last error.
+- Graceful MongoDB startup failure and runtime loss handling; the previous route snapshot stays
+  active and management endpoints return `503` until refresh succeeds.
+- Dynamic routing documentation in [docs/dynamic-routing.md](docs/dynamic-routing.md).
+
+Phase 5 is implemented:
+
+- Multiple persisted backend instances per route, while retaining the legacy `target` field.
+- Per-route Round Robin, Least Connections, and Random load-balancing strategies.
+- Configurable periodic backend health checks and threshold-based recovery/failover.
+- Health-aware selection, structured `503` when no configured backend is healthy, and runtime
+  backend status/counts through `/health` and the management API.
+- Tests for selection, health transitions, persistence, refresh, and MongoDB recovery.
+- Load-balancing documentation in [docs/load-balancing.md](docs/load-balancing.md).
+
+Phase 6 is implemented:
+
+- Responsive administrator dashboard overview with live gateway, database, route, and backend
+  health data.
+- Route list, create/edit/detail, enable/disable, delete confirmation, and registry refresh using the
+  existing management API.
+- Backend instance add/edit/enable/disable/remove workflows through route updates.
+- Per-route load-balancing configuration and latest gateway-reported backend eligibility.
+- Health monitoring view with gateway/database/registry status and backend health-check details.
+- Activity Logs navigation is intentionally unavailable: request logs are currently terminal-only
+  and there is no log retrieval API.
+- Dashboard implementation and workflows documented in [docs/dashboard.md](docs/dashboard.md).
 
 Not implemented yet:
 
-- Dynamic route creation and management through the dashboard or management API.
-- Load balancing across service instances.
-- Gateway route and request-metric persistence.
-- Dashboard analytics and configuration screens.
+- Request-metric persistence and dashboard analytics.
 - Retries, circuit breaking, authentication, rate limiting, and service-to-service communication.
+
+Run gateway unit tests without MongoDB using `npm run test:unit` from the repository root. Run the
+MongoDB-backed suite with `GATEWAY_TEST_MONGODB_URI` set to a dedicated test server using
+`npm run test:integration`. The integration suite creates and drops a unique test database; see
+[docs/gateway.md](docs/gateway.md) for details.
+Run dashboard validation tests with `npm run test:frontend` and build it with
+`npm run build:frontend`.
