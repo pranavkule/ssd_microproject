@@ -1,0 +1,32 @@
+{
+  "name": "dynamic-api-gateway",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Dynamic L7 API Gateway and reverse proxy with a React management dashboard",
+  "workspaces": [
+    "frontend",
+    "gateway",
+    "services/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n GATEWAY,FRONTEND -c blue,green \"npm:dev:gateway\" \"npm:dev:frontend\"",
+    "dev:all": "concurrently -k -n GATEWAY,FRONTEND,USER-1,USER-2,PRODUCT,ORDER,PAYMENT -c blue,green,cyan,magenta,yellow,red,white \"npm:dev:gateway\" \"npm:dev:frontend\" \"npm:dev:user\" \"npm:dev:user:2\" \"npm:dev:product\" \"npm:dev:order\" \"npm:dev:payment\"",
+    "dev:gateway": "npm run dev --workspace gateway",
+    "dev:frontend": "npm run dev --workspace frontend",
+    "dev:services": "concurrently -k -n USER,PRODUCT,ORDER,PAYMENT -c cyan,magenta,yellow,red \"npm:dev:user\" \"npm:dev:product\" \"npm:dev:order\" \"npm:dev:payment\"",
+    "dev:user": "cross-env PORT=5001 npm run dev --workspace services/user-service",
+    "dev:user:2": "cross-env PORT=5002 npm run dev --workspace services/user-service",
+    "dev:product": "cross-env PORT=5003 npm run dev --workspace services/product-service",
+    "dev:order": "cross-env PORT=5005 npm run dev --workspace services/order-service",
+    "dev:payment": "cross-env PORT=5007 npm run dev --workspace services/payment-service",
+    "start:gateway": "npm run start --workspace gateway",
+    "build:frontend": "npm run build --workspace frontend"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.7",
+    "cross-env": "^10.1.0"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  }
+}
