@@ -56,7 +56,7 @@ function LoadBalancingPage() {
                 <div className="eligible-heading"><span><CircleCheck size={15} /> Eligible backends</span><strong>{eligible.length} / {route.backendInstances?.length || 0}</strong></div>
                 {(route.backendInstances || []).length === 0 ? <p className="muted-copy">No backends configured.</p> : <div className="eligible-backends">{route.backendInstances.map((backend) => {
                   const isEligible = route.enabled && backend.enabled && Boolean(backend.health?.healthy);
-                  return <div className="eligible-backend" key={backend.id}><span className={`eligibility-dot ${isEligible ? 'dot-good' : 'dot-muted'}`} /><div><strong>{backend.id}</strong><code>{displayTarget(backend.target)}</code></div><StatusBadge status={backend.health?.status || 'unknown'} /></div>;
+                  return <div className="eligible-backend" key={backend.id}><span className={`eligibility-dot ${isEligible ? 'dot-good' : 'dot-muted'}`} /><div><strong>{backend.name || backend.id}</strong><code>{displayTarget(backend.target)} · port {backend.port ?? 'unknown'} · {backend.requestCount ?? 0} requests</code></div><StatusBadge status={backend.health?.status || 'unknown'} /></div>;
                 })}</div>}
                 <p className="strategy-note"><Info size={14} /> Eligible status is based on the latest gateway health response. The gateway remains authoritative for request selection.</p>
                 <Link className="panel-link inline-link" to={`/backends?routeId=${route.id}`}>Manage backend pool <ArrowUpRight size={14} /></Link>
@@ -65,7 +65,7 @@ function LoadBalancingPage() {
           </div>
         )}
       </Panel>
-      <p className="page-footnote">The backend accepts a weight field as metadata, but the currently supported strategies are not weighted. This dashboard does not display request distribution counts because the gateway does not expose them.</p>
+      <p className="page-footnote">Request counts show backend selections since the gateway started. Health and eligibility are based on the latest gateway health response.</p>
     </div>
   );
 }

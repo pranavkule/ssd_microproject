@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
   Activity, Boxes, ChevronLeft, ChevronRight, CircleDot, Gauge,
-  LayoutDashboard, Menu, Network, ScrollText, Waypoints, X, SlidersHorizontal,
+  LayoutDashboard, Menu, Network, ScrollText, Waypoints, X, SlidersHorizontal, ShieldCheck,
 } from 'lucide-react';
 import { useDashboard } from '../contexts/DashboardContext.jsx';
 import { RefreshButton, StatusBadge } from '../components/DashboardUI.jsx';
@@ -13,6 +13,8 @@ const navigation = [
   { to: '/routes', label: 'Routes', icon: Waypoints },
   { to: '/backends', label: 'Backend instances', icon: Boxes },
   { to: '/load-balancing', label: 'Load balancing', icon: Network },
+  { to: '/rate-limiting', label: 'Rate limiting', icon: Gauge },
+  { to: '/jwt-playground', label: 'JWT playground', icon: ShieldCheck },
   { to: '/health', label: 'Health monitoring', icon: Activity },
   { to: '/activity-logs', label: 'Activity logs', icon: ScrollText },
   { to: '/settings', label: 'Gateway settings', icon: SlidersHorizontal },

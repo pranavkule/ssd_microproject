@@ -4,9 +4,10 @@ const gatewayBaseUrl =
   import.meta.env.VITE_GATEWAY_BASE_URL ||
   import.meta.env.VITE_API_BASE_URL ||
   'http://localhost:8000';
+export const gatewayOrigin = gatewayBaseUrl.replace(/\/+$/, '');
 
 const api = axios.create({
-  baseURL: gatewayBaseUrl.replace(/\/+$/, ''),
+  baseURL: gatewayOrigin,
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
@@ -89,6 +90,17 @@ export const metricsApi = {
 };
 
 export const configurationApi = {
+  async getConfiguration(config) {
+    const response = await api.get('/api/gateway/config', config);
+    return response.data.data;
+  },
+  async updateConfiguration(settings) {
+    const response = await api.put('/api/gateway/config', settings);
+    return response.data.data;
+  },
+};
+
+export const rateLimitingApi = {
   async getConfiguration(config) {
     const response = await api.get('/api/gateway/config', config);
     return response.data.data;

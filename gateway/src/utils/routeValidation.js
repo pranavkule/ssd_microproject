@@ -321,7 +321,7 @@ function validateCreatePayload(payload) {
     loadBalancingStrategy: normalizeStrategy(
       payload.loadBalancingStrategy ?? payload.strategy
     ),
-    methods: normalizeMethods(payload.methods),
+    methods: withImplicitHeadSupport(normalizeMethods(payload.methods)),
     description: normalizeDescription(payload.description),
     enabled:
       payload.enabled === undefined ? true : normalizeBoolean(payload.enabled, 'enabled'),
@@ -370,7 +370,7 @@ function validateUpdatePayload(payload) {
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, 'methods')) {
-    updates.methods = normalizeMethods(payload.methods);
+    updates.methods = withImplicitHeadSupport(normalizeMethods(payload.methods));
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, 'description')) {
@@ -436,7 +436,7 @@ function normalizeRegistryRoute(route) {
     target,
     backendInstances,
     loadBalancingStrategy: normalizeStrategy(route.loadBalancingStrategy),
-    methods: normalizeMethods(route.methods),
+    methods: withImplicitHeadSupport(normalizeMethods(route.methods)),
     description: normalizeDescription(route.description),
     enabled: normalizeBoolean(route.enabled, 'enabled'),
     stripPrefix: normalizeBoolean(route.stripPrefix, 'stripPrefix'),

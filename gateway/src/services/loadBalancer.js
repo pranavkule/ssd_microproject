@@ -1,5 +1,6 @@
 const roundRobinState = new Map();
 const activeConnections = new Map();
+const requestCounts = new Map();
 
 function backendKey(routeId, backendId) {
   return `${routeId}:${backendId}`;
@@ -58,6 +59,7 @@ function selectBackend(route, healthMonitor) {
   }
 
   const key = backendKey(route._id, backend.id);
+  requestCounts.set(key, (requestCounts.get(key) || 0) + 1);
   activeConnections.set(key, (activeConnections.get(key) || 0) + 1);
   let released = false;
 
@@ -83,18 +85,40 @@ function getActiveConnections(routeId, backendId) {
   return activeConnections.get(backendKey(routeId, backendId)) || 0;
 }
 
+function getRequestCount(routeId, backendId) {
+  return requestCounts.get(backendKey(routeId, backendId)) || 0;
+}
+
 function resetRoute(routeId) {
   roundRobinState.delete(String(routeId));
+  const prefix = `${routeId}:`;
+  for (const key of requestCounts.keys()) {
+    if (key.startsWith(prefix)) requestCounts.delete(key);
+  }
+}
+
+function syncRoutes(routes) {
+  const configured = new Set(
+    routes.flatMap((route) =>
+      (route.backendInstances || []).map((backend) => backendKey(route._id, backend.id))
+    )
+  );
+  for (const key of requestCounts.keys()) {
+    if (!configured.has(key)) requestCounts.delete(key);
+  }
 }
 
 function reset() {
   roundRobinState.clear();
   activeConnections.clear();
+  requestCounts.clear();
 }
 
 module.exports = {
   selectBackend,
   getActiveConnections,
+  getRequestCount,
   resetRoute,
+  syncRoutes,
   reset,
 };

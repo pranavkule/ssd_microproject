@@ -1,5 +1,6 @@
 const Route = require('../models/Route');
 const backendHealthMonitor = require('./backendHealthMonitor');
+const loadBalancer = require('./loadBalancer');
 const {
   pathMatchesPrefix,
   normalizeRegistryRoute,
@@ -72,6 +73,7 @@ function applySnapshot(routes, metadata) {
     stale: metadata.stale,
   };
   backendHealthMonitor.syncRoutes(allRoutes);
+  loadBalancer.syncRoutes(allRoutes);
 
   return getStats();
 }

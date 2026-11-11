@@ -11,4 +11,15 @@ test('validates supported runtime settings and rejects unknown or out-of-range v
     () => validateConfiguration({ arbitraryEnvironmentVariable: 'value' }),
     { statusCode: 400 }
   );
+  assert.deepEqual(validateConfiguration({
+    rateLimitEnabled: false,
+    rateLimitCapacity: 50,
+    rateLimitRefillRate: 10,
+  }), {
+    rateLimitEnabled: false,
+    rateLimitCapacity: 50,
+    rateLimitRefillRate: 10,
+  });
+  assert.throws(() => validateConfiguration({ rateLimitEnabled: 'false' }), { statusCode: 400 });
+  assert.throws(() => validateConfiguration({ rateLimitCapacity: 0 }), { statusCode: 400 });
 });

@@ -161,7 +161,7 @@ test('returns 404 for unmatched paths and 405 with Allow for unsupported methods
 });
 
 test('forwards HEAD and returns no response body', async () => {
-  const route = newRoute({ path: '/head-test', methods: ['GET', 'HEAD'] });
+  const route = newRoute({ path: '/head-test', methods: ['GET'] });
   await withRoute(route, async () => {
     const response = await fetch(`http://127.0.0.1:${gateway.address().port}/head-test`, {
       method: 'HEAD',
@@ -170,6 +170,17 @@ test('forwards HEAD and returns no response body', async () => {
     assert.equal(response.headers.get('x-upstream-response'), 'preserved');
     assert.equal(await response.text(), '');
   });
+});
+
+test('exposes live rate-limit configuration through the dashboard API', async () => {
+  const response = await fetch(`http://127.0.0.1:${gateway.address().port}/api/gateway/config`);
+  const result = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(result.data.settings.rateLimitEnabled, true);
+  assert.equal(result.data.settings.rateLimitCapacity, 100);
+  assert.equal(result.data.settings.rateLimitRefillRate, 20);
+  assert.equal(result.data.rateLimiting.enabled, true);
+  assert.equal(typeof result.data.rateLimiting.rejectedRequests, 'number');
 });
 
 test('distributes proxy requests across healthy backend instances', async () => {
@@ -196,9 +207,34 @@ test('distributes proxy requests across healthy backend instances', async () => 
       const second = await fetch(`http://127.0.0.1:${gateway.address().port}/balanced`);
       assert.equal((await first.json()).url, '/balanced');
       assert.equal(await second.text(), 'second');
+      const { getRequestCount } = require('../src/services/loadBalancer');
+      assert.equal(getRequestCount(route.id, 'one'), 1);
+      assert.equal(getRequestCount(route.id, 'two'), 1);
     });
+
   } finally {
     await close(secondBackend);
+  }
+});
+
+test('returns HTTP 429 when the configured token bucket is empty', async () => {
+  const { rateLimiter } = require('../src/services/rateLimiter');
+  const route = newRoute({ path: '/rate-limit' });
+  rateLimiter.reset();
+  rateLimiter.configure({ enabled: true, capacity: 1, refillRate: 1 });
+  try {
+    await withRoute(route, async () => {
+      const first = await fetch(`http://127.0.0.1:${gateway.address().port}/rate-limit`);
+      const second = await fetch(`http://127.0.0.1:${gateway.address().port}/rate-limit`);
+      assert.equal(first.status, 200);
+      assert.equal(second.status, 429);
+      assert.equal(second.headers.get('retry-after'), '1');
+      assert.equal((await second.json()).error, 'RATE_LIMIT_EXCEEDED');
+      assert.equal(rateLimiter.getSnapshot().rejectedRequests, 1);
+    });
+  } finally {
+    rateLimiter.configure({ enabled: false, capacity: 100, refillRate: 20 });
+    rateLimiter.reset();
   }
 });
 

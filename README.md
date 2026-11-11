@@ -249,6 +249,10 @@ The dashboard defaults to `http://localhost:8000` as its gateway API. Set
 a compatibility alias. See [docs/dashboard.md](docs/dashboard.md) for dashboard workflows and API
 behavior.
 
+The dashboard also includes a live token-bucket rate-limiting page and a JWT testing playground.
+The benchmark script compares a direct backend request with requests through the gateway. See
+[docs/demo-guide.md](docs/demo-guide.md) for a step-by-step demonstration.
+
 ### Start individually
 
 Gateway:
@@ -306,8 +310,8 @@ transitions, and the Postman collection.
 | POST | `/api/gateway/routes/refresh` | Reload routes from MongoDB |
 | GET | `/api/gateway/logs` | Filter and paginate persisted public proxy request logs |
 | GET | `/api/gateway/metrics` | Current-process public traffic metrics (resets on restart) |
-| GET | `/api/gateway/config` | Read effective runtime settings and persistence source |
-| PUT | `/api/gateway/config` | Persist and immediately apply supported timeout/health-check settings |
+| GET | `/api/gateway/config` | Read runtime settings, persistence source, and live rate-limit counters |
+| PUT | `/api/gateway/config` | Persist and immediately apply timeout, health-check, and rate-limit settings |
 
 ### Gateway Proxy Routes
 
@@ -327,7 +331,13 @@ valid RS256 bearer token before it forwards traffic.
 
 Browser CORS preflight requests are answered by the gateway and are not sent upstream. An explicit
 `OPTIONS` request without preflight headers is proxied only when `OPTIONS` is enabled on that route.
-Default routes include `HEAD`, and HEAD responses contain no body.
+Every route that supports `GET` also supports `HEAD`, including routes loaded from older database
+records. HEAD responses contain response headers but no body.
+
+The in-memory Token Bucket rate limiter is enabled by default with capacity 100 and a refill rate of
+20 requests per second. It is configurable in the dashboard and only trusts the direct peer
+connection address, not client-supplied forwarded-IP headers. Buckets and rejection counts are
+process-local and reset when the gateway restarts.
 
 ### Local JWT demonstration
 
@@ -371,6 +381,15 @@ Run the frontend tests and production build with:
 npm run test:frontend
 npm run build:frontend
 ```
+
+Run the benchmark's local execution test with:
+
+```powershell
+npm run test:benchmark
+```
+
+For a live comparison, see [docs/demo-guide.md](docs/demo-guide.md). The benchmark writes its actual
+measurements to `benchmark-results.json` by default; use `--output` to choose another location.
 
 The deployment smoke test is an end-to-end check for the installed Ubuntu single-EC2 deployment.
 It requires MongoDB, Nginx, the gateway, and all five services to be running under systemd; it
@@ -561,24 +580,38 @@ Phase 6 is implemented:
 - Backend instance add/edit/enable/disable/remove workflows through route updates.
 - Per-route load-balancing configuration and latest gateway-reported backend eligibility.
 - Health monitoring view with gateway/database/registry status and backend health-check details.
--   - Activity Logs page displays persisted, filtered request records; query values with sensitive key
-    names are redacted and headers/bodies are never stored.
-  - Overview reports process-local request totals, outcomes, status codes, and average latency.
-  - Gateway Settings reads and updates the supported persisted timeout and health-check controls.
-  - Dashboard implementation and workflows documented in [docs/dashboard.md](docs/dashboard.md).
+- Activity Logs page displays persisted, filtered request records; query values with sensitive key
+  names are redacted and headers/bodies are never stored.
+- Overview reports process-local request totals, outcomes, status codes, and average latency.
+- Gateway Settings reads and updates supported persisted timeout and health-check controls.
+- Dashboard implementation and workflows documented in [docs/dashboard.md](docs/dashboard.md).
 
-  Phase 7 is implemented:
+Phase 7 is implemented:
 
-  - MongoDB-backed request logs with bounded filters, pagination, request IDs, and sensitive query
-    redaction.
-  - In-memory current-process metrics, explicitly separate from historical request records.
-  - Persistent gateway timeout and health-check configuration with validated live application.
-  - Database and observability details documented in [docs/database.md](docs/database.md).
+- MongoDB-backed request logs with bounded filters, pagination, request IDs, and sensitive query
+  redaction.
+- In-memory current-process metrics, explicitly separate from historical request records.
+- Persistent gateway timeout and health-check configuration with validated live application.
+- Database and observability details documented in [docs/database.md](docs/database.md).
 
-  Not implemented:
+Phase 8 is implemented:
 
-  - Historical/distributed metrics and log retention policies.
-  - Retries, circuit breaking, authentication, rate limiting, and service-to-service communication.
+- Optional RS256 JWT verification using local development JWKS or AWS Secrets Manager.
+- Route-level required-role checks, with authentication updates applied to the live registry.
+- A dashboard JWT playground that sends real requests through the gateway without exposing private
+  keys.
+- Configurable in-memory token-bucket rate limiting, with per-client bucket cleanup and rejected
+  request counts.
+- Per-backend request-selection counts exposed by gateway health and route APIs.
+
+Not implemented:
+
+- Distributed rate limiting, historical/distributed metrics, and log retention policies.
+- Retries, circuit breaking, and service-to-service communication.
+
+The dashboard's Load balancing page displays the configured algorithm, backend name/port, health,
+and gateway-process request count. Counts record selections since the current gateway process
+started.
 
 Run gateway unit tests without MongoDB using `npm run test:unit` from the repository root. Run the
 MongoDB-backed suite with `GATEWAY_TEST_MONGODB_URI` set to a dedicated test server using

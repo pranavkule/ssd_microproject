@@ -24,6 +24,7 @@
     "test:frontend": "npm run test --workspace frontend",
     "test:unit": "npm run test:unit --workspace gateway",
     "test:integration": "npm run test:integration --workspace gateway",
+    "test:benchmark": "node --test deployment/scripts/benchmark.test.mjs",
     "build:frontend": "npm run build --workspace frontend",
     "smoke:deployment": "node deployment/scripts/smoke-test.mjs"
   },

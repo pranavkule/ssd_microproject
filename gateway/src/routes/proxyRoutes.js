@@ -4,6 +4,7 @@ const { attachRequestLogging } = require('../middleware/requestLogger');
 const backendHealthMonitor = require('../services/backendHealthMonitor');
 const loadBalancer = require('../services/loadBalancer');
 const { jwtAuthenticator } = require('../services/jwtAuthentication');
+const { rateLimit } = require('../middleware/rateLimit');
 
 function sendMethodNotAllowed(req, res, match) {
   req.gatewayMatchedRoute =
@@ -40,6 +41,7 @@ function createProxyRoutes(options = {}) {
     }
 
     req.gatewayRoute = match.route;
+    if (!rateLimit(req, res)) return;
     try {
       await authenticator.authorize(req, match.route);
     } catch (error) {

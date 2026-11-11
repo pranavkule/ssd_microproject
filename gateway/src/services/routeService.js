@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Route = require('../models/Route');
 const routeRegistry = require('./routeRegistry');
 const backendHealthMonitor = require('./backendHealthMonitor');
+const loadBalancer = require('./loadBalancer');
 const { connectDatabase } = require('../config/db');
 const { buildDefaultRoutes } = require('../config/defaultRoutes');
 const {
@@ -10,7 +11,6 @@ const {
   validateUpdatePayload,
   assertValidObjectId,
   normalizeBoolean,
-  withImplicitHeadSupport,
   serializeRoute,
 } = require('../utils/routeValidation');
 
@@ -207,16 +207,21 @@ function serializeRouteWithHealth(route) {
   const serialized = serializeRoute(route);
   return {
     ...serialized,
-    backendInstances: serialized.backendInstances.map((backend) => ({
-      ...backend,
-      health: backendHealthMonitor.getBackendHealth(serialized, backend),
-    })),
+    backendInstances: serialized.backendInstances.map((backend) => {
+      const target = new URL(backend.target);
+      return {
+        ...backend,
+        name: backend.id,
+        port: Number(target.port) || (target.protocol === 'https:' ? 443 : 80),
+        requestCount: loadBalancer.getRequestCount(serialized._id, backend.id),
+        health: backendHealthMonitor.getBackendHealth(serialized, backend),
+      };
+    }),
   };
 }
 
 async function createRoute(payload) {
   const routeData = validateCreatePayload(payload);
-  routeData.methods = withImplicitHeadSupport(routeData.methods);
   assertDatabaseAvailable();
   await ensureUniqueRoute(routeData.name, routeData.path);
 
@@ -262,9 +267,6 @@ async function updateRoute(id, payload) {
         : [{ id: 'primary', target: route.target, enabled: true }];
     instances[0].target = updates.target;
     updates.backendInstances = instances;
-  }
-  if (updates.methods) {
-    updates.methods = withImplicitHeadSupport(updates.methods);
   }
   Object.assign(route, updates);
 

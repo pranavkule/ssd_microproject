@@ -3,6 +3,12 @@ const { getDatabaseStatus } = require('../config/db');
 const routeRegistry = require('../services/routeRegistry');
 const backendHealthMonitor = require('../services/backendHealthMonitor');
 const { redactTarget } = require('../utils/routeValidation');
+const loadBalancer = require('../services/loadBalancer');
+
+function getBackendPort(target) {
+  const url = new URL(target);
+  return Number(url.port) || (url.protocol === 'https:' ? 443 : 80);
+}
 
 function getHealth(req, res) {
   const routes = routeRegistry.getRoutes();
@@ -30,6 +36,9 @@ function getHealth(req, res) {
       loadBalancingStrategy: route.loadBalancingStrategy,
       backends: route.backendInstances.map((backend) => ({
         id: backend.id,
+        name: backend.id,
+        port: getBackendPort(backend.target),
+        requestCount: loadBalancer.getRequestCount(route._id, backend.id),
         target: redactTarget(backend.target),
         enabled: route.enabled && backend.enabled,
         weight: backend.weight || null,

@@ -8,6 +8,8 @@ import LoadBalancingPage from './pages/LoadBalancingPage.jsx';
 import HealthPage from './pages/HealthPage.jsx';
 import ActivityLogsPage from './pages/ActivityLogsPage.jsx';
 import GatewaySettingsPage from './pages/GatewaySettingsPage.jsx';
+import RateLimitingPage from './pages/RateLimitingPage.jsx';
+import JwtPlaygroundPage from './pages/JwtPlaygroundPage.jsx';
 import NotFound from './pages/NotFound.jsx';
 import { DashboardProvider, ToastProvider } from './contexts/DashboardContext.jsx';
 
@@ -22,6 +24,8 @@ function App() {
             <Route path="routes/:id" element={<RouteDetails />} />
             <Route path="backends" element={<BackendsPage />} />
             <Route path="load-balancing" element={<LoadBalancingPage />} />
+            <Route path="rate-limiting" element={<RateLimitingPage />} />
+            <Route path="jwt-playground" element={<JwtPlaygroundPage />} />
             <Route path="health" element={<HealthPage />} />
             <Route path="activity-logs" element={<ActivityLogsPage />} />
             <Route path="settings" element={<GatewaySettingsPage />} />

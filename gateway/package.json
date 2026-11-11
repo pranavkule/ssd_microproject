@@ -9,7 +9,7 @@
     "start": "node src/server.js",
     "auth:keys": "node scripts/generate-dev-jwt-keys.js",
     "auth:token": "node scripts/issue-demo-token.js",
-    "test:unit": "node --test test/routeValidation.test.js test/routeRegistry.test.js test/loadBalancer.test.js test/backendHealthMonitor.test.js test/proxy.test.js test/jwtAuthentication.test.js test/jwtSecretProvider.test.js test/jwtProxy.test.js test/startup.test.js test/requestMetrics.test.js test/requestLogValidation.test.js test/gatewayConfiguration.test.js",
+    "test:unit": "node --test test/routeValidation.test.js test/routeRegistry.test.js test/loadBalancer.test.js test/backendHealthMonitor.test.js test/proxy.test.js test/jwtAuthentication.test.js test/jwtSecretProvider.test.js test/jwtProxy.test.js test/startup.test.js test/requestMetrics.test.js test/requestLogValidation.test.js test/gatewayConfiguration.test.js test/rateLimiter.test.js",
     "test:integration": "node --test test/integration.test.js",
     "test": "npm run test:unit && npm run test:integration"
   },

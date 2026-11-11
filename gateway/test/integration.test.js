@@ -349,10 +349,19 @@ test(
       assert.equal(config.data.data.source, 'database');
       const changedConfig = await request(baseUrl, '/api/gateway/config', {
         method: 'PUT',
-        body: { proxyTimeoutMs: 12000, healthCheckIntervalMs: 6000 },
+        body: {
+          proxyTimeoutMs: 12000,
+          healthCheckIntervalMs: 6000,
+          rateLimitEnabled: false,
+          rateLimitCapacity: 30,
+          rateLimitRefillRate: 10,
+        },
       });
       assert.equal(changedConfig.response.status, 200);
       assert.equal(changedConfig.data.data.settings.proxyTimeoutMs, 12000);
+      assert.equal(changedConfig.data.data.rateLimiting.enabled, false);
+      assert.equal(changedConfig.data.data.rateLimiting.capacity, 30);
+      assert.equal(changedConfig.data.data.rateLimiting.refillRate, 10);
       assert.equal(require('../src/services/proxyService').getProxyTimeout(), 12000);
       assert.equal(backendHealthMonitor.getConfiguration().intervalMs, 6000);
       assert.equal((await GatewayConfiguration.findById('gateway').lean()).proxyTimeoutMs, 12000);

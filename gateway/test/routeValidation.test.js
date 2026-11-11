@@ -26,7 +26,9 @@ test('normalizes valid route paths, targets, and methods', () => {
     'HEAD',
     'OPTIONS',
   ]);
-  assert.deepEqual(validateCreatePayload(validPayload).methods, ['GET']);
+  assert.deepEqual(validateCreatePayload(validPayload).methods, ['GET', 'HEAD']);
+  assert.deepEqual(validateUpdatePayload({ methods: ['GET'] }).methods, ['GET', 'HEAD']);
+  assert.deepEqual(validateCreatePayload({ ...validPayload, methods: ['HEAD'] }).methods, ['HEAD']);
 });
 
 test('rejects invalid and reserved paths and invalid targets', () => {

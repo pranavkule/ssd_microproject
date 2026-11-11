@@ -62,6 +62,18 @@ test('matches the longest prefix and respects path segment boundaries', () => {
   assert.equal(registry.matchRoute('/api/v20', 'GET').route.name, 'Short');
 });
 
+test('automatically adds HEAD support when routes are loaded from storage', async () => {
+  const storedRoute = route({
+    id: '000000000000000000000022',
+    path: '/stored-get',
+    methods: ['GET'],
+  });
+  await loadRoutes([storedRoute]);
+
+  assert.deepEqual(registry.getRoutes()[0].methods, ['GET', 'HEAD']);
+  assert.equal(registry.matchRoute('/stored-get', 'HEAD').route.path, '/stored-get');
+});
+
 test('enforces methods and supports HEAD on configured routes', () => {
   registry.upsertRoute(route({ path: '/read', methods: ['GET', 'HEAD'] }));
 

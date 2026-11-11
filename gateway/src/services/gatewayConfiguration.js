@@ -3,6 +3,7 @@ const env = require('../config/env');
 const GatewayConfiguration = require('../models/GatewayConfiguration');
 const backendHealthMonitor = require('./backendHealthMonitor');
 const proxyService = require('./proxyService');
+const { rateLimiter, DEFAULT_CAPACITY, DEFAULT_REFILL_RATE } = require('./rateLimiter');
 const { createHttpError } = require('../utils/routeValidation');
 
 const RANGES = Object.freeze({
@@ -11,14 +12,20 @@ const RANGES = Object.freeze({
   healthCheckTimeoutMs: [100, 60000],
   healthCheckFailureThreshold: [1, 20],
   healthCheckRecoveryThreshold: [1, 20],
+  rateLimitCapacity: [1, 100000],
+  rateLimitRefillRate: [1, 10000],
 });
-const fields = Object.keys(RANGES);
+const numericFields = Object.keys(RANGES);
+const fields = [...numericFields, 'rateLimitEnabled'];
 const defaults = Object.freeze({
   proxyTimeoutMs: env.proxyTimeoutMs,
   healthCheckIntervalMs: env.healthCheckIntervalMs,
   healthCheckTimeoutMs: env.healthCheckTimeoutMs,
   healthCheckFailureThreshold: env.healthCheckFailureThreshold,
   healthCheckRecoveryThreshold: env.healthCheckRecoveryThreshold,
+  rateLimitEnabled: true,
+  rateLimitCapacity: DEFAULT_CAPACITY,
+  rateLimitRefillRate: DEFAULT_REFILL_RATE,
 });
 let settings = { ...defaults };
 let loadedFromDatabase = false;
@@ -30,6 +37,12 @@ function validateConfiguration(payload) {
   const keys = Object.keys(payload);
   if (!keys.length) throw createHttpError(400, 'At least one setting is required');
   for (const key of keys) {
+    if (key === 'rateLimitEnabled') {
+      if (typeof payload[key] !== 'boolean') {
+        throw createHttpError(400, 'rateLimitEnabled must be a boolean');
+      }
+      continue;
+    }
     const range = RANGES[key];
     if (!range) throw createHttpError(400, `Unsupported configuration setting: ${key}`);
     const value = payload[key];
@@ -41,13 +54,18 @@ function validateConfiguration(payload) {
 }
 
 function applyRuntime(next) {
-  const normalized = Object.fromEntries(fields.map((field) => [field, next[field]]));
+  const normalized = { ...defaults, ...next };
   proxyService.setProxyTimeout(normalized.proxyTimeoutMs);
   backendHealthMonitor.updateConfiguration({
     intervalMs: normalized.healthCheckIntervalMs,
     timeoutMs: normalized.healthCheckTimeoutMs,
     failureThreshold: normalized.healthCheckFailureThreshold,
     recoveryThreshold: normalized.healthCheckRecoveryThreshold,
+  });
+  rateLimiter.configure({
+    enabled: normalized.rateLimitEnabled,
+    capacity: normalized.rateLimitCapacity,
+    refillRate: normalized.rateLimitRefillRate,
   });
   settings = normalized;
 }
@@ -56,6 +74,7 @@ function configurationSnapshot() {
   const persistenceAvailable = mongoose.connection.readyState === 1;
   return {
     settings: { ...settings },
+    rateLimiting: rateLimiter.getSnapshot(),
     source: loadedFromDatabase
       ? persistenceAvailable ? 'database' : 'database_cache'
       : 'environment_defaults',
@@ -79,7 +98,7 @@ async function initialize() {
   try {
     let document = await GatewayConfiguration.findById('gateway').lean();
     if (!document) document = (await GatewayConfiguration.create(defaults)).toObject();
-    applyRuntime(document);
+    applyRuntime({ ...defaults, ...document });
     loadedFromDatabase = true;
   } catch (error) {
     applyRuntime(defaults);
@@ -96,7 +115,7 @@ async function updateConfiguration(payload) {
   }
   if (!loadedFromDatabase) await initialize();
   const previous = { ...settings };
-  const next = { ...previous, ...updates };
+  const next = { ...defaults, ...previous, ...updates };
   const document = await GatewayConfiguration.findOneAndUpdate(
     { _id: 'gateway' },
     { $set: next },
