@@ -148,6 +148,38 @@ function normalizeMethods(value) {
   return methods;
 }
 
+function withImplicitHeadSupport(methods) {
+  if (!Array.isArray(methods)) {
+    return methods;
+  }
+
+  const nextMethods = [...methods];
+  if (nextMethods.includes('GET') && !nextMethods.includes('HEAD')) {
+    nextMethods.push('HEAD');
+  }
+
+  return nextMethods;
+}
+
+function routeAllowsMethod(route, method) {
+  if (!route || !method) {
+    return false;
+  }
+
+  const requestMethod = String(method).toUpperCase();
+  const supported = withImplicitHeadSupport(route.methods || []);
+
+  if (supported.includes(requestMethod)) {
+    return true;
+  }
+
+  if (requestMethod === 'HEAD' && supported.includes('GET')) {
+    return true;
+  }
+
+  return false;
+}
+
 function normalizeDescription(value) {
   if (value === undefined || value === null) {
     return '';
@@ -434,6 +466,8 @@ module.exports = {
   normalizeTarget,
   redactTarget,
   normalizeMethods,
+  withImplicitHeadSupport,
+  routeAllowsMethod,
   normalizeDescription,
   normalizeBoolean,
   normalizeRoles,

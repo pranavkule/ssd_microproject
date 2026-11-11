@@ -215,8 +215,15 @@ function matchRoute(pathname, method) {
 
   const requestMethod = String(method || '').toUpperCase();
   const allowedMethods = [...route.methods];
+  if (allowedMethods.includes('GET') && !allowedMethods.includes('HEAD')) {
+    allowedMethods.push('HEAD');
+  }
 
-  if (!allowedMethods.includes(requestMethod)) {
+  const methodAllowed =
+    allowedMethods.includes(requestMethod) ||
+    (requestMethod === 'HEAD' && allowedMethods.includes('GET'));
+
+  if (!methodAllowed) {
     return {
       route: null,
       pathMatched: true,

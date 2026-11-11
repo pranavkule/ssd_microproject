@@ -10,6 +10,7 @@ const {
   validateUpdatePayload,
   assertValidObjectId,
   normalizeBoolean,
+  withImplicitHeadSupport,
   serializeRoute,
 } = require('../utils/routeValidation');
 
@@ -215,6 +216,7 @@ function serializeRouteWithHealth(route) {
 
 async function createRoute(payload) {
   const routeData = validateCreatePayload(payload);
+  routeData.methods = withImplicitHeadSupport(routeData.methods);
   assertDatabaseAvailable();
   await ensureUniqueRoute(routeData.name, routeData.path);
 
@@ -260,6 +262,9 @@ async function updateRoute(id, payload) {
         : [{ id: 'primary', target: route.target, enabled: true }];
     instances[0].target = updates.target;
     updates.backendInstances = instances;
+  }
+  if (updates.methods) {
+    updates.methods = withImplicitHeadSupport(updates.methods);
   }
   Object.assign(route, updates);
 

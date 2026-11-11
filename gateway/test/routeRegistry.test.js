@@ -71,6 +71,15 @@ test('enforces methods and supports HEAD on configured routes', () => {
   assert.deepEqual(mismatch.allowedMethods, ['GET', 'HEAD']);
 });
 
+test('allows HEAD for GET routes even when HEAD is not explicitly configured', () => {
+  registry.upsertRoute(route({ path: '/get-only', methods: ['GET'] }));
+
+  const match = registry.matchRoute('/get-only', 'HEAD');
+  assert.equal(match.route.path, '/get-only');
+  assert.equal(match.methodNotAllowed, false);
+  assert.deepEqual(match.allowedMethods, ['GET', 'HEAD']);
+});
+
 test('refreshes from MongoDB and preserves the previous snapshot on failure', async () => {
   const persisted = route({ id: '000000000000000000000010', path: '/persisted' });
   const stats = await loadRoutes([persisted]);
