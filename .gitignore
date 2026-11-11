@@ -1,5 +1,16 @@
 # Dependencies
 node_modules/
+gateway/.local-jwt/
+.aws/
+
+# Private keys and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.cert
 
 # Environment files
 .env
@@ -25,6 +36,20 @@ tmp/
 temp/
 *.tmp
 *.local
+
+# Local MongoDB data and backups
+data/db/
+mongodb-data/
+mongo-data/
+database/data/
+database/backups/
+mongo-backups/
+mongodb-backups/
+mongodump/
+*.bson
+*.dump
+*.archive
+*.backup
 
 # Editor and operating system files
 .vscode/

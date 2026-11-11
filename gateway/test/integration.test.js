@@ -1,4 +1,6 @@
 const http = require('node:http');
+const fs = require('node:fs/promises');
+const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 const test = require('node:test');
@@ -14,6 +16,7 @@ const routeService = require('../src/services/routeService');
 const gatewayConfiguration = require('../src/services/gatewayConfiguration');
 const requestMetrics = require('../src/services/requestMetrics');
 const backendHealthMonitor = require('../src/services/backendHealthMonitor');
+const { jwtSecretProvider } = require('../src/services/jwtSecretProvider');
 const { connectDatabase } = require('../src/config/db');
 
 const mongoUri = process.env.GATEWAY_TEST_MONGODB_URI;
@@ -56,6 +59,9 @@ test(
   { skip: mongoUri ? false : 'Set GATEWAY_TEST_MONGODB_URI to run isolated MongoDB integration tests' },
   async () => {
     const originalMongoUri = env.mongoUri;
+    const originalAwsSecretName = env.awsSecretName;
+    const originalLocalJwksPath = env.jwtLocalJwksPath;
+    const originalNodeEnv = env.nodeEnv;
     const testDatabase = `gateway_phase7_test_${process.pid}_${Date.now()}`;
     const parsedMongoUri = new URL(mongoUri);
     parsedMongoUri.pathname = `/${testDatabase}`;
@@ -65,8 +71,33 @@ test(
     let upstreamOne;
     let upstreamTwo;
     let upstreamFailure;
+    let authTestDirectory;
 
     try {
+      const { SignJWT, exportJWK, generateKeyPair } = await import('jose');
+      authTestDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'gateway-jwt-integration-'));
+      const { publicKey, privateKey } = await generateKeyPair('RS256', { modulusLength: 2048 });
+      const publicJwk = await exportJWK(publicKey);
+      env.awsSecretName = '';
+      env.nodeEnv = 'test';
+      env.jwtLocalJwksPath = path.join(authTestDirectory, 'public.jwks.json');
+      await fs.writeFile(
+        env.jwtLocalJwksPath,
+        JSON.stringify({
+          keys: [{ ...publicJwk, kid: 'integration-key', alg: 'RS256', use: 'sig' }],
+        })
+      );
+      assert.equal(await jwtSecretProvider.refresh(), true);
+      const issueToken = (roles) =>
+        new SignJWT({ roles })
+          .setProtectedHeader({ alg: 'RS256', kid: 'integration-key' })
+          .setSubject('integration-user')
+          .setIssuedAt()
+          .setIssuer(env.jwtIssuer)
+          .setAudience(env.jwtAudience)
+          .setExpirationTime('5m')
+          .sign(privateKey);
+
       assert.equal(await connectDatabase(), true);
       await mongoose.connection.dropDatabase();
       await GatewayRequestLog.init();
@@ -133,6 +164,67 @@ test(
       await backendHealthMonitor.checkAll();
       assert.equal(created.data.data.backendInstances.length, 2);
       assert.equal(created.data.data.loadBalancingStrategy, 'round_robin');
+
+      const authRoute = await request(baseUrl, '/api/gateway/routes', {
+        method: 'POST',
+        body: {
+          name: 'Integration Authentication Route',
+          path: '/integration-auth',
+          target: `http://127.0.0.1:${portTwo}`,
+          methods: ['GET'],
+        },
+      });
+      assert.equal(authRoute.response.status, 201);
+      const authRouteId = authRoute.data.data.id;
+      await backendHealthMonitor.checkAll();
+      const authEnabled = await request(baseUrl, `/api/gateway/routes/${authRouteId}`, {
+        method: 'PUT',
+        body: { authRequired: true, requiredRoles: ['admin'] },
+      });
+      assert.equal(authEnabled.response.status, 200);
+      assert.equal((await Route.findById(authRouteId)).authRequired, true);
+      assert.deepEqual((await Route.findById(authRouteId)).requiredRoles, ['admin']);
+      const authRefresh = await request(baseUrl, '/api/gateway/routes/refresh', {
+        method: 'POST',
+      });
+      assert.equal(authRefresh.response.status, 200);
+      assert.equal(registry.matchRoute('/integration-auth', 'GET').route.authRequired, true);
+      let authResponse = await fetch(`${baseUrl}/integration-auth`);
+      assert.equal(authResponse.status, 401);
+      assert.equal((await authResponse.json()).error, 'AUTHENTICATION_REQUIRED');
+      authResponse = await fetch(`${baseUrl}/integration-auth`, {
+        headers: { authorization: `Bearer ${await issueToken(['reader'])}` },
+      });
+      assert.equal(authResponse.status, 403);
+      authResponse = await fetch(`${baseUrl}/integration-auth`, {
+        headers: { authorization: `Bearer ${await issueToken(['admin'])}` },
+      });
+      assert.equal(authResponse.status, 200);
+      const invalidRoleUpdate = await request(baseUrl, `/api/gateway/routes/${authRouteId}`, {
+        method: 'PUT',
+        body: { requiredRoles: 'admin' },
+      });
+      assert.equal(invalidRoleUpdate.response.status, 400);
+      assert.deepEqual(
+        registry.matchRoute('/integration-auth', 'GET').route.requiredRoles,
+        ['admin']
+      );
+      const authDisabled = await request(baseUrl, `/api/gateway/routes/${authRouteId}`, {
+        method: 'PUT',
+        body: { authRequired: false, requiredRoles: [] },
+      });
+      assert.equal(authDisabled.response.status, 200);
+      const disabledRefresh = await request(baseUrl, '/api/gateway/routes/refresh', {
+        method: 'POST',
+      });
+      assert.equal(disabledRefresh.response.status, 200);
+      assert.equal(
+        (await fetch(`${baseUrl}/integration-auth`)).status,
+        200,
+        'authentication changes should apply without a gateway restart'
+      );
+      await request(baseUrl, `/api/gateway/routes/${authRouteId}`, { method: 'DELETE' });
+      requestMetrics.reset();
 
       result = await request(baseUrl, `/api/gateway/routes/${routeId}`);
       assert.equal(result.response.status, 200);
@@ -463,6 +555,10 @@ const registry = require('./src/services/routeRegistry');
         await mongoose.disconnect();
       }
       env.mongoUri = originalMongoUri;
+      env.awsSecretName = originalAwsSecretName;
+      env.jwtLocalJwksPath = originalLocalJwksPath;
+      env.nodeEnv = originalNodeEnv;
+      if (authTestDirectory) await fs.rm(authTestDirectory, { recursive: true, force: true });
     }
   }
 );

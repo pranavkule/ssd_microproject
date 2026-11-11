@@ -174,6 +174,22 @@ function normalizeBoolean(value, fieldName) {
   return value;
 }
 
+function normalizeRoles(value) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 20) {
+    throw createHttpError(400, 'requiredRoles must be an array of at most 20 roles');
+  }
+  const roles = [];
+  for (const role of value) {
+    if (typeof role !== 'string' || !/^[A-Za-z0-9:_-]{1,64}$/.test(role.trim())) {
+      throw createHttpError(400, 'Each required role must be 1-64 letters, digits, or _:-');
+    }
+    const normalized = role.trim();
+    if (!roles.includes(normalized)) roles.push(normalized);
+  }
+  return roles;
+}
+
 function normalizeStrategy(value) {
   const strategy = value === undefined ? 'round_robin' : value;
 
@@ -281,6 +297,11 @@ function validateCreatePayload(payload) {
       payload.stripPrefix === undefined
         ? false
         : normalizeBoolean(payload.stripPrefix, 'stripPrefix'),
+    authRequired:
+      payload.authRequired === undefined
+        ? false
+        : normalizeBoolean(payload.authRequired, 'authRequired'),
+    requiredRoles: normalizeRoles(payload.requiredRoles),
   };
 }
 
@@ -332,6 +353,14 @@ function validateUpdatePayload(payload) {
     updates.stripPrefix = normalizeBoolean(payload.stripPrefix, 'stripPrefix');
   }
 
+  if (Object.prototype.hasOwnProperty.call(payload, 'authRequired')) {
+    updates.authRequired = normalizeBoolean(payload.authRequired, 'authRequired');
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'requiredRoles')) {
+    updates.requiredRoles = normalizeRoles(payload.requiredRoles);
+  }
+
   if (Object.keys(updates).length === 0) {
     throw createHttpError(400, 'No valid route fields were provided for update');
   }
@@ -379,6 +408,11 @@ function normalizeRegistryRoute(route) {
     description: normalizeDescription(route.description),
     enabled: normalizeBoolean(route.enabled, 'enabled'),
     stripPrefix: normalizeBoolean(route.stripPrefix, 'stripPrefix'),
+    authRequired:
+      route.authRequired === undefined
+        ? false
+        : normalizeBoolean(route.authRequired, 'authRequired'),
+    requiredRoles: normalizeRoles(route.requiredRoles),
     createdAt: route.createdAt ? new Date(route.createdAt).toISOString() : null,
     updatedAt: route.updatedAt ? new Date(route.updatedAt).toISOString() : null,
   };
@@ -402,6 +436,7 @@ module.exports = {
   normalizeMethods,
   normalizeDescription,
   normalizeBoolean,
+  normalizeRoles,
   normalizeStrategy,
   normalizeBackendInstances,
   LOAD_BALANCING_STRATEGIES,

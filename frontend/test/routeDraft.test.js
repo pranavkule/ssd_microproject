@@ -37,3 +37,24 @@ test('rejects invalid backend targets and duplicate backend IDs', () => {
   assert.match(errors['backend-0'], /HTTP or HTTPS/);
   assert.match(errors['backend-1'], /duplicated/i);
 });
+
+test('accepts route roles and rejects invalid or duplicate role names', () => {
+  assert.deepEqual(
+    validateRouteDraft({
+      ...validDraft,
+      authRequired: true,
+      requiredRoles: 'operator, auditor',
+    }),
+    {}
+  );
+  const duplicateErrors = validateRouteDraft({
+    ...validDraft,
+    requiredRoles: 'operator, operator',
+  });
+  assert.match(duplicateErrors.requiredRoles, /unique/i);
+  const invalidErrors = validateRouteDraft({
+    ...validDraft,
+    requiredRoles: 'invalid role',
+  });
+  assert.match(invalidErrors.requiredRoles, /role/i);
+});

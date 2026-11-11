@@ -19,6 +19,16 @@ export function validateRouteDraft(draft) {
     errors.path = 'Route path conflicts with a reserved gateway endpoint.';
   }
   if (!draft.methods.length) errors.methods = 'Select at least one HTTP method.';
+  const requiredRoles = (draft.requiredRoles || '')
+    .split(',')
+    .map((role) => role.trim())
+    .filter(Boolean);
+  if (requiredRoles.length > 20) errors.requiredRoles = 'At most 20 required roles are allowed.';
+  else if (requiredRoles.some((role) => !/^[A-Za-z0-9:_-]{1,64}$/.test(role))) {
+    errors.requiredRoles = 'Each role must be 1-64 letters, digits, or _:-.';
+  } else if (new Set(requiredRoles).size !== requiredRoles.length) {
+    errors.requiredRoles = 'Required roles must be unique.';
+  }
   if (!draft.backendInstances.length) errors.backendInstances = 'At least one backend instance is required.';
 
   const backendIds = new Set();

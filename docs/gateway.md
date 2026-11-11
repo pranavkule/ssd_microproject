@@ -10,7 +10,8 @@ proxied requests do not query MongoDB for routing decisions.
 Phase 4 replaces the static prefix table used in Phase 3. The four default service routes are seeded
 on first startup, but administrators can create new routes, change targets, disable routes, and
 delete routes without restarting the gateway. Phase 5 extends routes to multiple backend instances
-and adds health-aware load balancing.
+and adds health-aware load balancing. Phase 8 adds optional route-level RS256 JWT verification and
+a cached public-key provider backed by AWS Secrets Manager or a local development JWKS file.
 
 See [dynamic-routing.md](dynamic-routing.md) for the route model, management API reference, matching
 rules, and detailed verification results.
@@ -23,7 +24,8 @@ The order is important for both body streaming and path isolation:
 2. CORS and gateway-handled browser preflight.
 3. Gateway management APIs, including routes, logs, metrics, and configuration.
 4. `/health`.
-5. Dynamic proxy router.
+5. Dynamic proxy router performs longest-prefix and method matching; protected routes verify JWTs
+   and roles before backend selection.
 6. Gateway 404 handler and centralized error handler.
 
 Management and health endpoints are registered before the dynamic proxy, so a route path cannot
@@ -36,11 +38,15 @@ to the selected backend instead of being consumed by the gateway.
 | --- | --- | --- | --- |
 | `/api/users` and `/api/users/*` | User Service | `http://localhost:5001`, `http://localhost:5002` | `GET, HEAD, POST, PUT, DELETE` |
 | `/api/products` and `/api/products/*` | Product Service | `http://localhost:5003` | `GET, HEAD, POST, PUT, DELETE` |
-| `/api/orders` and `/api/orders/*` | Order Service | `http://localhost:5005` | `GET, POST, PATCH, DELETE` |
-| `/api/payments` and `/api/payments/*` | Payment Service | `http://localhost:5007` | `GET, POST` |
+| `/api/orders` and `/api/orders/*` | Order Service | `http://localhost:5005` | `GET, HEAD, POST, PATCH, DELETE` |
+| `/api/payments` and `/api/payments/*` | Payment Service | `http://localhost:5007` | `GET, HEAD, POST` |
 | `/health` | Gateway | Local handler | Management endpoint |
 | `/api/gateway/routes` | Gateway route management API | Local handler | Management endpoints |
 | Any other path | None | None | Structured gateway `404` |
+
+Default routes remain public (`authRequired: false`) to preserve existing behavior. Set
+`authRequired: true` and optionally `requiredRoles` through the route API or dashboard to protect a
+route.
 
 Prefix matching respects path boundaries. `/api/users` and `/api/users/123` match the User Service
 route, while `/api/users-extra` does not. When multiple routes match, the longest path wins.
@@ -73,9 +79,20 @@ Copy `gateway/.env.example` to `gateway/.env` and adjust values if needed.
 | `BACKEND_HEALTH_CHECK_FAILURE_THRESHOLD` | `2` | Consecutive failures before a backend becomes unhealthy |
 | `BACKEND_HEALTH_CHECK_RECOVERY_THRESHOLD` | `1` | Consecutive successes before an unhealthy backend recovers |
 | `GATEWAY_PROXY_TIMEOUT_MS` | `10000` | Default timeout for one upstream request; can be changed through config API |
+| `JWT_ISSUER` | `dynamic-api-gateway` | Expected JWT issuer |
+| `JWT_AUDIENCE` | `dynamic-api-gateway` | Expected JWT audience |
+| `JWT_ALGORITHM` | `RS256` | Only supported algorithm |
+| `AWS_REGION` | unset | Region when using AWS Secrets Manager |
+| `AWS_SECRET_NAME` | unset | Secret name or ARN containing public JWKS |
+| `JWT_LOCAL_JWKS_PATH` | local public JWKS path | Local provider when AWS is not configured |
+| `JWT_DEMO_PRIVATE_KEY_PATH` | local private-key path | Private key used only by the development demo CLI |
+| `JWT_SECRET_REFRESH_INTERVAL_MS` | `300000` | Public key cache refresh interval |
 
 Service URL variables are used only when seeding missing default routes. Once a route exists, its
 persisted target is authoritative and is changed through the management API.
+AWS credentials and private signing keys are not environment values. The SDK uses its standard
+credential chain; use an EC2 IAM role for AWS and grant only `secretsmanager:GetSecretValue` for the
+configured public-key secret.
 
 ## Running
 
@@ -115,6 +132,10 @@ error instead of crashing.
 | `GET` | `/api/gateway/metrics` | Read current-process public proxy traffic metrics |
 | `GET` | `/api/gateway/config` | Read effective runtime settings and their source |
 | `PUT` | `/api/gateway/config` | Persist and apply supported timeout/health-check settings |
+
+Route `POST` and `PUT` payloads also accept `authRequired` (boolean, default `false`) and
+`requiredRoles` (at most 20 unique role names). Existing database persistence and registry
+replacement apply policy updates immediately without a gateway restart.
 
 Create a route:
 
@@ -183,9 +204,11 @@ the request is not a browser preflight.
 2. Management and health paths are handled before the proxy.
 3. The dynamic proxy router finds the longest active route prefix.
 4. A method mismatch returns `405` with an `Allow` header.
-5. A matching request records the route name and start time, then streams to the route target.
-6. The target's status, headers, and body are returned through the gateway.
-7. A request ID is returned in `X-Request-Id`; completed public requests update process metrics and
+5. If the matched route requires authentication, the gateway validates the RS256 bearer token,
+   issuer, audience, required claims, and any configured role before selecting a backend.
+6. A matching request records the route name and start time, then streams to the selected target.
+7. The target's status, headers, and body are returned through the gateway.
+8. A request ID is returned in `X-Request-Id`; completed public requests update process metrics and
    are persisted asynchronously when MongoDB is available.
 
 Paths and query strings are preserved unless the route has `stripPrefix: true`. With
@@ -233,6 +256,10 @@ Status codes:
 | --- | --- | --- |
 | No active route matches | `404 Not Found` | `ROUTE_NOT_FOUND` |
 | Path matches but the method is not allowed | `405 Method Not Allowed` | `METHOD_NOT_ALLOWED` |
+| Protected route with missing/malformed bearer header | `401 Unauthorized` | `AUTHENTICATION_REQUIRED` |
+| Invalid/expired token, unsupported algorithm, missing claims, wrong issuer/audience | `401 Unauthorized` | `INVALID_TOKEN` |
+| Valid token without an allowed route role | `403 Forbidden` | `INSUFFICIENT_PERMISSIONS` |
+| Protected route has no valid verification key set | `503 Service Unavailable` | `AUTH_VERIFICATION_UNAVAILABLE` |
 | Connection refused, DNS failure, or early connection reset | `502 Bad Gateway` | `SERVICE_UNAVAILABLE` |
 | Upstream request exceeds the 10 second proxy timeout | `504 Gateway Timeout` | `GATEWAY_TIMEOUT` |
 
@@ -251,6 +278,34 @@ A timeout example:
 
 Failure responses do not include stack traces, internal addresses, or raw connection errors. Proxy
 failure details are written to the gateway stderr log.
+
+## Route-level JWT verification
+
+Routes persist `authRequired` (default `false`) and `requiredRoles` (default `[]`). The request is
+matched and method-checked before authentication, but no backend is selected or contacted until
+verification and role authorization succeed. Role configuration accepts at most 20 unique names.
+When present, the token must contain at least one configured role in `roles` or `role`.
+
+The gateway accepts RS256 only and requires `sub`, `iat`, `exp`, `iss`, and `aud`. `JWT_ISSUER` and
+`JWT_AUDIENCE` are checked against the claims. Invalid credentials do not expose token content or
+verification details; authorization headers are not recorded in telemetry.
+
+Verification keys are public-only RSA JWKS. The provider reads from AWS Secrets Manager if
+`AWS_SECRET_NAME` is configured, otherwise it reads `JWT_LOCAL_JWKS_PATH`. It loads at startup,
+caches keys in process memory, and refreshes on the configured interval. Failed refreshes retain the
+last known-good cache. A cold start without a valid key set returns 503 only for protected routes;
+public routes continue normally.
+
+For local demonstrations, generate keys and a fixed-role user token using:
+
+```powershell
+npm run auth:keys --workspace gateway
+npm run auth:token --workspace gateway
+```
+
+See [authentication.md](authentication.md) for request examples and local issuer limitations and
+[secret-manager.md](secret-manager.md) for AWS IAM and rotation guidance. Route-management APIs
+remain unauthenticated by this feature and must be restricted to trusted callers at deployment.
 
 A stopped backend does not stop the gateway. `/health` remains available, and requests succeed again
 after the backend restarts. If a backend response has already started, the gateway ends the response
@@ -374,21 +429,23 @@ Proxy failures are logged to stderr with the failure cause:
 Safe query strings may be included in the console URL, with sensitive query values redacted.
 Request headers and bodies are not logged.
 
-## Phase 5 Limitations
+## Known limitations
 
 The following are intentionally not implemented yet:
 
 - Retries and circuit breaking.
-- Authentication, API keys, rate limiting, and access policies.
+- API keys and rate limiting.
 - Historical request metrics and long-term retention policies.
 - WebSocket proxying and streaming-specific configuration.
 - The optional backend `weight` value is configuration metadata; Round Robin, Least Connections,
   and Random do not use weighted selection.
+- Management APIs do not require authentication; network-level access controls are required outside
+  trusted development environments.
 
 ## Tests
 
-Run unit, validation, registry, and live local proxy tests without MongoDB using
-`npm run test:unit` from the repository root. Run the separate MongoDB-backed management,
+Run unit, validation, registry, live local proxy, JWT, and mocked AWS-provider tests without MongoDB
+using `npm run test:unit` from the repository root. Run the separate MongoDB-backed management,
 persistence, seeding, and recovery test with `GATEWAY_TEST_MONGODB_URI` set to a reachable MongoDB
 server (`npm run test:integration`). The integration suite creates and drops a unique test database;
 without the variable the integration test is skipped.

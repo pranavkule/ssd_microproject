@@ -1,0 +1,23 @@
+[Unit]
+Description=User Service on port %i
+Wants=network-online.target
+Requires=mongod.service
+After=network-online.target mongod.service
+
+[Service]
+Type=simple
+User=dynamic-gateway
+Group=dynamic-gateway
+WorkingDirectory=/opt/dynamic-api-gateway/services/user-service
+EnvironmentFile=/etc/dynamic-api-gateway/services.env
+Environment=PORT=%i
+ExecStartPre=/usr/bin/bash /opt/dynamic-api-gateway/deployment/scripts/wait-for-mongodb.sh
+ExecStart=/usr/bin/node src/server.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

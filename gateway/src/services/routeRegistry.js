@@ -33,6 +33,7 @@ function freezeRoute(route) {
   return Object.freeze({
     ...route,
     methods: Object.freeze([...route.methods]),
+    requiredRoles: Object.freeze([...route.requiredRoles]),
     backendInstances: Object.freeze(
       route.backendInstances.map((backend) => Object.freeze({ ...backend }))
     ),

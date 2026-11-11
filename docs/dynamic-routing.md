@@ -6,7 +6,7 @@ Phase 4 replaces the hard-coded proxy prefix table with a MongoDB-backed route r
 be created, edited, enabled, disabled, and deleted at runtime through the gateway management API.
 Phase 5 extends routes with multiple backends and health-aware load balancing. The active route set
 is held in memory as an immutable snapshot, so proxied requests do not query MongoDB for route
-configuration.
+configuration. Phase 8 adds optional authentication policy to that same route snapshot.
 
 The proxy engine remains `http-proxy-middleware`. A single shared proxy instance resolves a healthy
 backend from the matched route on each request, which allows route and backend changes to take effect
@@ -43,6 +43,8 @@ Routes are stored in the `routes` collection of the `dynamic_api_gateway` databa
 | `description` | String | No | Optional description, up to 500 characters |
 | `enabled` | Boolean | No | Defaults to `true`; disabled routes are not proxied |
 | `stripPrefix` | Boolean | No | Defaults to `false`; removes the matched route prefix |
+| `authRequired` | Boolean | No | Defaults to `false`; require a valid RS256 bearer token |
+| `requiredRoles` | String[] | No | Defaults to `[]`; if set, a verified token must match at least one configured role |
 | `createdAt` | Date | Automatic | Creation timestamp |
 | `updatedAt` | Date | Automatic | Last update timestamp |
 
@@ -50,6 +52,8 @@ Route creation and updates accept `backends` as an alias for `backendInstances`,
 an alias for `loadBalancingStrategy`. Legacy `target`-only payloads remain supported and represent
 a single backend. Runtime health state is not persisted; the monitor owns that transient state.
 `weight` is accepted and returned as metadata but does not affect the three supported strategies.
+Authentication settings are persisted with the route and reloaded through the existing registry;
+verification keys are never stored in MongoDB.
 
 Supported methods are `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, and `OPTIONS`. All default
 routes include `HEAD` because their corresponding backends expose GET handlers. HEAD requests are
@@ -145,6 +149,8 @@ Example response:
     "description": "External catalog API",
     "enabled": true,
     "stripPrefix": false,
+    "authRequired": false,
+    "requiredRoles": [],
     "createdAt": "2026-11-10T06:00:00.000Z",
     "updatedAt": "2026-11-10T06:00:00.000Z"
   }
@@ -153,8 +159,8 @@ Example response:
 
 ### Update a route
 
-`PUT` accepts any subset of `name`, `path`, `target`, `methods`, `description`, `enabled`, and
-`stripPrefix`. Duplicate names or paths are rejected.
+`PUT` accepts any subset of `name`, `path`, `target`, `methods`, `description`, `enabled`,
+`stripPrefix`, `authRequired`, and `requiredRoles`. Duplicate names or paths are rejected.
 
 ```bash
 curl -X PUT http://localhost:8000/api/gateway/routes/ROUTE_ID \
@@ -163,6 +169,17 @@ curl -X PUT http://localhost:8000/api/gateway/routes/ROUTE_ID \
 ```
 
 The new target is used by the next proxied request. No gateway restart is required.
+
+Enable JWT verification and an optional role policy in the same update:
+
+```bash
+curl -X PUT http://localhost:8000/api/gateway/routes/ROUTE_ID \
+  -H "Content-Type: application/json" \
+  -d "{\"authRequired\":true,\"requiredRoles\":[\"operator\"]}"
+```
+
+The policy takes effect immediately. See [authentication.md](authentication.md) for token
+verification and [secret-manager.md](secret-manager.md) for AWS/local JWKS providers.
 
 ### Toggle a route
 
@@ -382,11 +399,12 @@ database during cleanup. If `GATEWAY_TEST_MONGODB_URI` is unset, the integration
 Test counts change as the suite evolves; use the runner output as the authoritative result for a
 given execution.
 
-## Phase 5 Limitations
+## Known limitations
 
-The following remain outside Phase 5:
+The following remain outside the current implementation:
 
 - Retries and circuit breaking.
-- Authentication, API keys, rate limiting, and route access policies.
+- API keys, rate limiting, and broader access policies.
 - Dashboard route-management screens and analytics.
 - Request metric persistence and WebSocket proxying.
+- Existing management APIs are unauthenticated and must be restricted to trusted callers.

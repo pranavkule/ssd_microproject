@@ -3,6 +3,7 @@ const proxyService = require('../services/proxyService');
 const { attachRequestLogging } = require('../middleware/requestLogger');
 const backendHealthMonitor = require('../services/backendHealthMonitor');
 const loadBalancer = require('../services/loadBalancer');
+const { jwtAuthenticator } = require('../services/jwtAuthentication');
 
 function sendMethodNotAllowed(req, res, match) {
   req.gatewayMatchedRoute =
@@ -24,48 +25,62 @@ function sendMethodNotAllowed(req, res, match) {
   });
 }
 
-function proxyRoutes(req, res, next) {
-  const match = routeRegistry.matchRoute(req.path, req.method);
+function createProxyRoutes(options = {}) {
+  const authenticator = options.authenticator || jwtAuthenticator;
 
-  if (match.methodNotAllowed) {
-    return sendMethodNotAllowed(req, res, match);
-  }
+  return async function proxyRoutes(req, res, next) {
+    const match = routeRegistry.matchRoute(req.path, req.method);
 
-  if (!match.route) {
-    return next();
-  }
+    if (match.methodNotAllowed) {
+      return sendMethodNotAllowed(req, res, match);
+    }
 
-  req.gatewayRoute = match.route;
-  const selection = loadBalancer.selectBackend(
-    match.route,
-    backendHealthMonitor
-  );
-  if (!selection) {
-    res.locals.gatewayErrorCategory = 'no_healthy_backend';
-    console.warn(
-      `[GATEWAY] No healthy backend available for route ${match.route.name}`
+    if (!match.route) {
+      return next();
+    }
+
+    req.gatewayRoute = match.route;
+    try {
+      await authenticator.authorize(req, match.route);
+    } catch (error) {
+      res.locals.gatewayErrorCategory = error.errorCode || 'authentication_error';
+      if (error.wwwAuthenticate) res.set('WWW-Authenticate', 'Bearer');
+      return next(error);
+    }
+
+    const selection = loadBalancer.selectBackend(
+      match.route,
+      backendHealthMonitor
     );
-    return res.status(503).json({
-      success: false,
-      error: 'NO_HEALTHY_BACKENDS',
-      message: `No healthy backend is available for route "${match.route.name}"`,
-      route: match.route.name,
-      timestamp: new Date().toISOString(),
-    });
-  }
+    if (!selection) {
+      res.locals.gatewayErrorCategory = 'no_healthy_backend';
+      console.warn(
+        `[GATEWAY] No healthy backend available for route ${match.route.name}`
+      );
+      return res.status(503).json({
+        success: false,
+        error: 'NO_HEALTHY_BACKENDS',
+        message: `No healthy backend is available for route "${match.route.name}"`,
+        route: match.route.name,
+        timestamp: new Date().toISOString(),
+      });
+    }
 
-  const backend = selection.backend;
-  req.gatewayBackend = backend;
-  req.gatewayRoute = { ...match.route, target: backend.target };
-  req.gatewayRoute.backendInstances = match.route.backendInstances.map((item) =>
-    item.id === backend.id ? backend : item
-  );
-  const release = () => selection.release();
-  res.once('finish', release);
-  res.once('close', release);
-  attachRequestLogging(req, res, req.gatewayRoute, backend);
+    const backend = selection.backend;
+    req.gatewayBackend = backend;
+    req.gatewayRoute = { ...match.route, target: backend.target };
+    req.gatewayRoute.backendInstances = match.route.backendInstances.map((item) =>
+      item.id === backend.id ? backend : item
+    );
+    const release = () => selection.release();
+    res.once('finish', release);
+    res.once('close', release);
+    attachRequestLogging(req, res, req.gatewayRoute, backend);
 
-  return proxyService.getDynamicProxy()(req, res, next);
+    return proxyService.getDynamicProxy()(req, res, next);
+  };
 }
 
+const proxyRoutes = createProxyRoutes();
 module.exports = proxyRoutes;
+module.exports.createProxyRoutes = createProxyRoutes;

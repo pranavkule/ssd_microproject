@@ -159,6 +159,22 @@ const routeSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    authRequired: {
+      type: Boolean,
+      default: false,
+    },
+    requiredRoles: {
+      type: [{ type: String, trim: true, maxlength: 64 }],
+      default: [],
+      validate: {
+        validator: (roles) =>
+          Array.isArray(roles) &&
+          roles.length <= 20 &&
+          new Set(roles).size === roles.length &&
+          roles.every((role) => /^[A-Za-z0-9:_-]{1,64}$/.test(role)),
+        message: 'Required roles must be unique valid role names',
+      },
+    },
   },
   {
     timestamps: true,

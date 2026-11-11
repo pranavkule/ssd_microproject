@@ -11,6 +11,8 @@ function draftFromRoute(route) {
     methods: route?.methods || ['GET', 'HEAD'],
     stripPrefix: Boolean(route?.stripPrefix),
     enabled: route?.enabled ?? true,
+    authRequired: route?.authRequired ?? false,
+    requiredRoles: (route?.requiredRoles || []).join(', '),
     loadBalancingStrategy: route?.loadBalancingStrategy || 'round_robin',
     backendInstances: (route?.backendInstances || [{ id: '', target: '', enabled: true }]).map(({ id, target, enabled, weight, healthCheckPath }) => ({
       id: id || '',
@@ -61,6 +63,10 @@ function RouteEditor({ route, onClose, onSave, saving = false }) {
         weight: backend.weight === '' ? undefined : Number(backend.weight),
         healthCheckPath: backend.healthCheckPath || undefined,
       })),
+      requiredRoles: draft.requiredRoles
+        .split(',')
+        .map((role) => role.trim())
+        .filter(Boolean),
     });
   }
 
@@ -87,8 +93,10 @@ function RouteEditor({ route, onClose, onSave, saving = false }) {
           <div className="toggle-field-stack">
             <label className="switch-row"><input type="checkbox" checked={draft.enabled} onChange={(event) => setField('enabled', event.target.checked)} /><span className="switch-control" /><span><strong>Route enabled</strong><small>Disabled routes are not matched by the proxy.</small></span></label>
             <label className="switch-row"><input type="checkbox" checked={draft.stripPrefix} onChange={(event) => setField('stripPrefix', event.target.checked)} /><span className="switch-control" /><span><strong>Strip matched prefix</strong><small>Remove the route prefix before forwarding.</small></span></label>
+            <label className="switch-row"><input type="checkbox" checked={draft.authRequired} onChange={(event) => setField('authRequired', event.target.checked)} /><span className="switch-control" /><span><strong>Require JWT authentication</strong><small>Reject requests without a valid gateway-verified bearer token.</small></span></label>
           </div>
         </div>
+        <label className="form-field"><span>Required roles <small className="inline-hint">optional, comma-separated</small></span><input value={draft.requiredRoles} onChange={(event) => setField('requiredRoles', event.target.value)} placeholder="e.g. operator, auditor" /><small>When roles are set on an authenticated route, a token must include at least one of them.</small></label>
 
         <div className="form-section">
           <div className="form-section-heading">

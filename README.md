@@ -6,9 +6,10 @@ dashboard with an Express gateway application and MongoDB persistence.
 ## Project Objective
 
 Build a management platform for configuring and operating a dynamic Layer 7 API gateway. Phases 1
-through 7 are implemented: gateway foundation, backend microservices, dynamic route management,
-load balancing, backend health monitoring, administrator dashboard, and database-backed gateway
-management and observability APIs.
+through 8 cover the gateway foundation, backend microservices, dynamic route management, load
+balancing, backend health monitoring, administrator dashboard, database-backed observability, and
+optional route-level JWT verification with AWS Secrets Manager public-key retrieval. Phase 9 adds a
+manual single-EC2 deployment option for AWS Academy without changing the local development workflow.
 
 ## Technology Stack
 
@@ -32,6 +33,8 @@ management and observability APIs.
 - dotenv
 - cors
 - http-proxy-middleware
+- jose
+- AWS SDK for JavaScript v3 (`@aws-sdk/client-secrets-manager`)
 - nodemon
 
 ### Development Tools
@@ -82,11 +85,18 @@ dynamic-api-gateway/
 │       Each service contains src/config, controllers, models, routes,
 │       services, middleware, app.js, server.js, .env.example, package.json
 ├── database/
+├── deployment/
+│   ├── nginx/
+│   ├── scripts/
+│   └── systemd/
 ├── docs/
 │   ├── architecture.md
+│   ├── aws-deployment.md
 │   ├── database.md
 │   ├── dynamic-routing.md
 │   ├── gateway.md
+│   ├── authentication.md
+│   ├── secret-manager.md
 │   ├── microservices.md
 │   └── postman/
 │       └── microservices.postman_collection.json
@@ -131,11 +141,23 @@ copy frontend\.env.example frontend\.env
 
 On macOS or Linux use `cp` instead of `copy`.
 
+## Optional AWS Academy single-EC2 deployment
+
+Phase 9 provides a manual AWS Console runbook and an Ubuntu installer for hosting Nginx, the React
+dashboard, gateway, all five service processes, and MongoDB on one EC2 instance. **No AWS resources
+have been provisioned and no cloud deployment has been verified.** The setup needs only SSH/HTTP
+ingress from approved client CIDRs and does not create custom IAM roles or require Secrets Manager.
+The deployment uses a local demo JWT key pair by explicit configuration. Read
+[docs/aws-deployment.md](docs/aws-deployment.md) for Academy constraints, setup, operations,
+backups, and safe cleanup. Review the current lab credits and instance availability; no fixed cost
+estimate is claimed. HTTP is for a trusted academic demo only.
+
 ### Gateway variables
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `PORT` | `8000` | Gateway HTTP port |
+| `GATEWAY_HOST` | `127.0.0.1` | Gateway bind address; deployment keeps it on loopback behind Nginx |
 | `NODE_ENV` | `development` | Runtime environment |
 | `MONGODB_URI` | `mongodb://127.0.0.1:27017/dynamic_api_gateway` | MongoDB connection string |
 | `FRONTEND_URL` | `http://localhost:5173` | Allowed CORS origin |
@@ -145,6 +167,15 @@ On macOS or Linux use `cp` instead of `copy`.
 | `ORDER_SERVICE_URL` | `http://localhost:5005` | Order Service target |
 | `PAYMENT_SERVICE_URL` | `http://localhost:5007` | Payment Service target |
 | `GATEWAY_PROXY_TIMEOUT_MS` | `10000` | Default timeout for upstream requests; can be changed through the configuration API |
+| `JWT_ISSUER` | `dynamic-api-gateway` | Expected JWT issuer |
+| `JWT_AUDIENCE` | `dynamic-api-gateway` | Expected JWT audience |
+| `JWT_ALGORITHM` | `RS256` | Only supported JWT signing algorithm |
+| `JWT_ALLOW_LOCAL_JWKS` | `false` in production | Explicitly allows the local JWKS provider; set only for the single-host demo when Secrets Manager is not used |
+| `AWS_REGION` | unset | AWS region when using Secrets Manager |
+| `AWS_SECRET_NAME` | unset | AWS Secrets Manager name or ARN containing public JWKS |
+| `JWT_LOCAL_JWKS_PATH` | local public JWKS path | Local verification keys when AWS is not configured |
+| `JWT_DEMO_PRIVATE_KEY_PATH` | `gateway/.local-jwt/private.pem` | Local-only private key path for the demo issuer |
+| `JWT_SECRET_REFRESH_INTERVAL_MS` | `300000` | Public JWKS refresh interval; last good keys remain active on failures |
 
 ### Frontend variables
 
@@ -152,8 +183,10 @@ On macOS or Linux use `cp` instead of `copy`.
 | --- | --- | --- |
 | `VITE_API_BASE_URL` | `http://localhost:8000` | Gateway base URL used by Axios |
 
-The gateway falls back to the local defaults above when no `.env` file is present. Never commit
-actual `.env` files or credentials. Only `.env.example` files belong in version control.
+The gateway falls back to the local defaults above when no `.env` file is present. AWS credentials
+and secret values must not be stored in `.env`; the AWS SDK uses its standard credential provider
+chain, including an EC2 IAM role. Local development may use the generated public JWKS provider.
+Never commit actual `.env` files or credentials.
 
 ## MongoDB Setup
 
@@ -288,9 +321,27 @@ when they are missing:
 | `/api/orders` | `http://localhost:5005` | `GET, HEAD, POST, PATCH, DELETE` |
 | `/api/payments` | `http://localhost:5007` | `GET, HEAD, POST` |
 
+Routes also accept `authRequired` (default `false`) and `requiredRoles` in the existing create/update
+APIs. Default services remain public for backwards compatibility. Configure the route to require a
+valid RS256 bearer token before it forwards traffic.
+
 Browser CORS preflight requests are answered by the gateway and are not sent upstream. An explicit
 `OPTIONS` request without preflight headers is proxied only when `OPTIONS` is enabled on that route.
 Default routes include `HEAD`, and HEAD responses contain no body.
+
+### Local JWT demonstration
+
+```powershell
+npm run auth:keys --workspace gateway
+npm run auth:token --workspace gateway
+```
+
+The local utility creates an ignored RSA private/public key pair and prints a short-lived token with
+the fixed `user` role. It is for local demonstration only; the private key is not exposed to the
+React app or stored in MongoDB. Configure a route's `requiredRoles` as `["user"]` to accept the
+demonstration token. Generate keys before starting the gateway; if it is already running, restart
+it or wait for the public-key refresh interval. See [docs/authentication.md](docs/authentication.md) and
+[docs/secret-manager.md](docs/secret-manager.md) for role, AWS, IAM, rotation, and testing details.
 
 ### Tests
 
@@ -310,6 +361,30 @@ npm run test:integration
 ```
 
 Run both suites with `npm test`.
+JWT and AWS-provider unit tests run without MongoDB or AWS credentials, using generated keys and a
+mock Secrets Manager client. The MongoDB integration suite also verifies route-authentication
+changes take effect immediately without restarting the gateway.
+
+Run the frontend tests and production build with:
+
+```bash
+npm run test:frontend
+npm run build:frontend
+```
+
+The deployment smoke test is an end-to-end check for the installed Ubuntu single-EC2 deployment.
+It requires MongoDB, Nginx, the gateway, and all five services to be running under systemd; it
+creates uniquely marked temporary records and removes them afterward. Run it on the target host
+only after reviewing its optional failover mode in
+[docs/aws-deployment.md](docs/aws-deployment.md):
+
+```bash
+sudo npm run smoke:deployment
+```
+
+It does not provision AWS resources. Run it as root because it restarts systemd services to verify
+persistence. On Windows or a local development setup without Nginx/systemd, run the gateway
+unit/integration suites, frontend tests/build, and service regression checks instead.
 
 The gateway forwards all allowed methods, preserving paths, query strings, request bodies, response
 status codes, and response payloads. For example:

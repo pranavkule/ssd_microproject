@@ -9,7 +9,9 @@ independently runnable backend microservices. Phase 3 introduces reverse proxyin
 static proxy configuration with a MongoDB-backed dynamic route registry and management API. Phase 5
 adds multiple backend instances per route, load balancing, and backend health monitoring.
 Phase 6 provides the administrator dashboard. Phase 7 adds persisted request records, process
-metrics, and a supported runtime gateway configuration API.
+metrics, and a supported runtime gateway configuration API. Phase 8 adds optional route-level
+RS256 JWT verification and AWS Secrets Manager public-key retrieval. Phase 9 adds a manually
+installed, single-EC2 deployment option for AWS Academy.
 
 ## High-Level Architecture
 
@@ -30,6 +32,7 @@ metrics, and a supported runtime gateway configuration API.
 | - Request IDs, CORS, and asynchronous request telemetry           |
 | - Dynamic route management API at /api/gateway/routes            |
 | - Log, metrics, and configuration management APIs                |
+| - Route-level JWT verification with cached public JWKS           |
 | - In-memory immutable route registry                             |
 | - Longest-prefix dynamic reverse proxy                           |
 | - /health management endpoint                                    |
@@ -74,6 +77,7 @@ Implemented responsibilities:
 - Inspect health-check status, last check, and failure counts.
 - Search and paginate persisted activity logs, inspect live process metrics, and edit supported
   gateway timeout/health-check configuration.
+- Configure optional per-route JWT requirements and role constraints without handling key material.
 
 Activity logs are backed by the request-log API; they do not contain headers or bodies and sensitive
 query values are redacted. Metrics show current-process values only.
@@ -108,6 +112,12 @@ Implemented responsibilities:
   pagination.
 - Maintain in-memory per-process traffic counters and expose their lifetime/reset scope explicitly.
 - Persist supported proxy-timeout and health-check settings; apply valid updates at runtime.
+- Persist per-route authentication and role requirements; apply valid changes through the existing
+  immutable registry without a gateway restart.
+- Verify protected-route RS256 JWTs, issuer, audience, required claims, and optional roles before
+  backend selection.
+- Cache public JWKS from AWS Secrets Manager or a local development file; fail closed on protected
+  routes when no valid verification key set is available.
 - Continue serving management endpoints while a backend service is unavailable.
 - Recover automatically when a backend service restarts.
 
@@ -122,8 +132,9 @@ Middleware order is deliberate:
 2. CORS and gateway-handled browser preflight.
 3. Gateway management APIs, including route, log, metrics, and configuration endpoints.
 4. `/health`.
-5. Dynamic proxy router.
-6. Gateway 404 and centralized error handling.
+5. Dynamic proxy router matches the longest route prefix and checks the method.
+6. For protected matches, JWT verification and role authorization occur before backend selection.
+7. Backend selection and reverse proxying, followed by 404 and centralized error handling.
 
 Management and health routes are registered before the proxy so a configurable route cannot shadow
 them. JSON body parsing is scoped to gateway management endpoints; proxy request bodies are streamed
@@ -132,7 +143,7 @@ to the target service.
 Planned responsibilities:
 
 - Retries and circuit breaking.
-- Rate limiting, authentication, and access policies.
+- Rate limiting and broader access policies.
 - Historical/distributed metrics and log retention policies.
 
 ### Backend Microservices
@@ -162,6 +173,7 @@ Collections:
 - `routes`: dynamic gateway route and backend-instance definitions.
 - `gatewayrequestlogs`: sanitized completed public request metadata.
 - `gatewayconfigurations`: singleton persisted runtime timeout and health-check settings.
+- `routes` also persist `authRequired` and `requiredRoles`; verification keys are never stored in MongoDB.
 - `users`, `products`, `orders`, `payments`: microservice domain data from Phase 2.
 
 The gateway reports its own connection state and route registry state through `/health`; it does not
@@ -199,6 +211,8 @@ Client
   -> Management / health path check
   -> Longest-prefix registry match
   -> Method check
+  -> Route-level JWT verification when enabled
+  -> Optional role authorization
   -> Dynamic target selection
   -> Optional stripPrefix rewrite
   -> Target microservice
@@ -272,9 +286,29 @@ successful refresh restores normal management behavior.
 | Round Robin, Least Connections, and Random per-route balancing | Implemented |
 | Periodic backend health checks and failover/recovery | Implemented |
 | Dynamic route management UI | Implemented |
+| Route-level RS256 JWT verification and role checks | Implemented |
+| AWS Secrets Manager public JWKS provider and local file provider | Implemented |
+| Local development-only token issuer utility | Implemented |
 | Historical/distributed analytics | Planned |
-| Retries, circuit breaking, authentication, and rate limiting | Planned |
+| Retries, circuit breaking, and rate limiting | Planned |
 | Service-to-service communication | Planned |
+| Single-EC2 Ubuntu installer, Nginx config, and systemd units | Implemented; not deployed |
+| AWS Academy Console deployment | Manual runbook only; not provisioned |
+| Live AWS integration and deployment smoke test | Unverified |
+
+## AWS Academy Single-EC2 Deployment
+
+The deployment runbook in [aws-deployment.md](aws-deployment.md) describes manually launching one
+Ubuntu 24.04 EC2 instance in the AWS Academy Console and running the installer. Nginx serves the
+React build, proxies API/health requests to the loopback-bound gateway, and restricts
+`/api/gateway` to loopback and an administrator CIDR. The gateway, both User Service instances,
+Product/Order/Payment services, and MongoDB also bind to loopback; the EC2 security group should
+expose only SSH and HTTP to approved CIDRs. MongoDB data and local demonstration JWT keys reside
+on the instance's persistent storage.
+
+This is a single-host academic demonstration, not a highly available or production deployment.
+The runbook creates no resources automatically and requires no custom IAM policy or Secrets Manager
+secret. AWS deployment and cloud behavior remain unverified; no resources were provisioned.
 
 ## Phase Boundaries
 
@@ -286,11 +320,16 @@ Phase 5 added multiple backends per route, health-aware load balancing, backend 
 and failover/recovery.
 Phase 7 added request IDs, sanitized asynchronous request persistence, log query/pagination APIs,
 current-process traffic metrics, and MongoDB-backed runtime timeout/health-check settings. Phase 7
-does not add authentication, secrets-provider integration, rate limiting, or distributed metrics.
+does not add authentication, rate limiting, or distributed metrics. Phase 8 adds optional
+route-level RS256 verification, role requirements, a local development token utility, and AWS
+Secrets Manager retrieval/caching for public JWKS. Phase 9 adds a manual single-EC2 AWS Academy
+runbook, loopback service binding, Nginx access controls, persistent MongoDB, and systemd process
+management; it does not provision AWS or claim a verified cloud deployment.
 
-Phases 5–7 deliberately exclude retries, circuit breaking, authentication, rate limiting, and
-WebSocket proxying. Metrics are process-local and reset at restart; log persistence depends on
-MongoDB availability.
+Phases 5–8 deliberately exclude retries, circuit breaking, rate limiting, and WebSocket proxying.
+Metrics are process-local and reset at restart; log persistence depends on MongoDB availability.
+The existing management API is not authenticated by Phase 8 and must be restricted to a trusted
+network or deployment access controls.
 
 Gateway tests use Node's built-in test runner. Run `npm run test:unit` without MongoDB. The separate
 management and persistence suite requires a reachable MongoDB server and an
@@ -298,4 +337,5 @@ management and persistence suite requires a reachable MongoDB server and an
 `npm run test:integration`. Do not point the test URI at a database containing user data. See
 [load-balancing.md](load-balancing.md) for backend selection and monitoring details, and
 [dashboard.md](dashboard.md) for the UI and API integration. See [database.md](database.md) for
-request logs, metrics, configuration, and test prerequisites.
+request logs, metrics, configuration, and test prerequisites. See [authentication.md](authentication.md)
+and [secret-manager.md](secret-manager.md) for JWT and AWS secret-provider details.

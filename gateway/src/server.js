@@ -7,10 +7,16 @@ const routeService = require('./services/routeService');
 const backendHealthMonitor = require('./services/backendHealthMonitor');
 const gatewayConfiguration = require('./services/gatewayConfiguration');
 const GatewayRequestLog = require('./models/GatewayRequestLog');
+const { jwtSecretProvider } = require('./services/jwtSecretProvider');
+const { jwtAuthenticator } = require('./services/jwtAuthentication');
 
 let server;
 
 async function startGateway() {
+  await jwtAuthenticator.initialize();
+  await jwtSecretProvider.initialize();
+  jwtSecretProvider.startRefresh();
+
   const connected = await connectDatabase();
 
   if (!connected) {
@@ -35,12 +41,12 @@ async function startGateway() {
 
   await backendHealthMonitor.start(routeRegistry.getRoutes());
 
-  server = app.listen(env.port, () => {
+  server = app.listen(env.port, env.host, () => {
     console.log(
-      `[gateway] Dynamic L7 API Gateway running on http://localhost:${env.port}`
+      `[gateway] Dynamic L7 API Gateway running on http://${env.host}:${env.port}`
     );
     console.log(
-      `[gateway] Health endpoint: http://localhost:${env.port}/health`
+      `[gateway] Health endpoint: http://${env.host}:${env.port}/health`
     );
   });
 }
@@ -48,6 +54,7 @@ async function startGateway() {
 function shutdown(signal) {
   console.log(`[gateway] Received ${signal}. Shutting down...`);
   backendHealthMonitor.stop();
+  jwtSecretProvider.stopRefresh();
 
   if (!server) {
     process.exit(0);
@@ -80,6 +87,6 @@ startGateway().catch((error) => {
   console.error('[gateway] Failed to start gateway:', error);
 
   if (!server) {
-    server = app.listen(env.port);
+    server = app.listen(env.port, env.host);
   }
 });

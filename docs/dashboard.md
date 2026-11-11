@@ -61,15 +61,21 @@ set health state or invent metrics.
 
 1. Open **Routes** and optionally search by route name/path or filter enabled state.
 2. Select **Create route** or edit an existing route.
-3. Configure path, methods, enabled state, strip-prefix behavior, strategy, and one or more backends.
+3. Configure path, methods, enabled state, strip-prefix behavior, strategy, backend instances, and
+   optional JWT authentication/required roles.
 4. Save to persist through the gateway API. Successful changes take effect through the runtime
    registry without a gateway restart.
 5. Inspect the route detail page or use route enable/disable and confirmed delete actions.
 6. Use **Refresh registry** to reload runtime routes from MongoDB if needed.
 
-Client-side checks cover required fields, URL/path shape, duplicate backend IDs within a route, and
-supported configuration constraints. Gateway responses are still authoritative for validation,
-reserved paths, duplicate names/paths, MongoDB availability, and conflicts.
+Client-side checks cover required fields, URL/path shape, duplicate backend IDs, supported
+configuration, and role-name syntax. Gateway responses are still authoritative for validation,
+reserved paths, duplicate names/paths, MongoDB availability, and conflicts. Route details display
+whether authentication is enabled and any required roles.
+
+The dashboard never receives or displays verification keys, signing keys, AWS credentials, or
+bearer tokens. Route-management APIs remain existing control-plane endpoints; protect their network
+access when deploying outside a trusted development environment.
 
 ## Backend Instance Workflow
 
@@ -155,3 +161,5 @@ The MongoDB integration suite creates and drops a unique test database. Set its 
 dedicated test server; do not use a database containing user data.
 See [database.md](database.md) for log schema, endpoint filters, metrics lifetime, configuration
 ranges, and MongoDB failure behavior.
+See [authentication.md](authentication.md) for route-authentication behavior and
+[secret-manager.md](secret-manager.md) for AWS/local key-provider configuration.

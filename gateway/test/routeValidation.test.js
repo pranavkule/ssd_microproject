@@ -97,6 +97,35 @@ test('validates backend instances and load-balancing strategies', () => {
 test('route model enforces unique route names and paths', () => {
   assert.equal(Route.schema.path('name').options.unique, true);
   assert.equal(Route.schema.path('path').options.unique, true);
+  assert.equal(Route.schema.path('authRequired').defaultValue, false);
+});
+
+test('validates route authentication settings and required roles', () => {
+  const created = validateCreatePayload({
+    ...validPayload,
+    authRequired: true,
+    requiredRoles: ['operator', 'reader'],
+  });
+  assert.equal(created.authRequired, true);
+  assert.deepEqual(created.requiredRoles, ['operator', 'reader']);
+  assert.deepEqual(
+    validateUpdatePayload({ authRequired: false, requiredRoles: ['reader'] }),
+    { authRequired: false, requiredRoles: ['reader'] }
+  );
+  assert.equal(validateCreatePayload(validPayload).authRequired, false);
+  assert.deepEqual(validateCreatePayload(validPayload).requiredRoles, []);
+  assert.throws(
+    () => validateUpdatePayload({ authRequired: 'true' }),
+    { statusCode: 400 }
+  );
+  assert.throws(
+    () => validateUpdatePayload({ requiredRoles: ['bad role'] }),
+    { statusCode: 400 }
+  );
+  assert.throws(
+    () => validateUpdatePayload({ requiredRoles: Array(21).fill('reader') }),
+    { statusCode: 400 }
+  );
 });
 
 test('all default routes advertise HEAD when they support GET', () => {

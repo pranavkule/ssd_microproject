@@ -3,10 +3,11 @@ const { connectDatabase } = require('./config/db');
 const app = require('./app');
 
 const PORT = Number(process.env.PORT) || 5007;
+const HOST = process.env.SERVICE_HOST || '127.0.0.1';
 
-const server = app.listen(PORT, () => {
-  console.log(`[payment-service] Running on http://localhost:${PORT}`);
-  console.log(`[payment-service] Health endpoint: http://localhost:${PORT}/health`);
+const server = app.listen(PORT, HOST, () => {
+  console.log(`[payment-service] Running on http://${HOST}:${PORT}`);
+  console.log(`[payment-service] Health endpoint: http://${HOST}:${PORT}/health`);
   connectDatabase();
 });
 

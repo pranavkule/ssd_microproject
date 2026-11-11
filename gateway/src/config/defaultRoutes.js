@@ -15,6 +15,8 @@ function buildDefaultRoutes() {
       description: 'User management backend service',
       enabled: true,
       stripPrefix: false,
+      authRequired: false,
+      requiredRoles: [],
     },
     {
       name: 'Product Service',
@@ -28,6 +30,8 @@ function buildDefaultRoutes() {
       description: 'Product catalog backend service',
       enabled: true,
       stripPrefix: false,
+      authRequired: false,
+      requiredRoles: [],
     },
     {
       name: 'Order Service',
@@ -41,6 +45,8 @@ function buildDefaultRoutes() {
       description: 'Order management backend service',
       enabled: true,
       stripPrefix: false,
+      authRequired: false,
+      requiredRoles: [],
     },
     {
       name: 'Payment Service',
@@ -54,6 +60,8 @@ function buildDefaultRoutes() {
       description: 'Payment simulation backend service',
       enabled: true,
       stripPrefix: false,
+      authRequired: false,
+      requiredRoles: [],
     },
   ];
 }

@@ -61,6 +61,8 @@ function RouteDetails() {
             <div><span>Load balancing</span><strong className="strategy-label">{route.loadBalancingStrategy?.replaceAll('_', ' ')}</strong></div>
             <div><span>Route status</span><StatusBadge status={route.enabled ? 'enabled' : 'disabled'} /></div>
             <div><span>Strip prefix</span><strong>{route.stripPrefix ? 'Enabled' : 'Disabled'}</strong></div>
+            <div><span>JWT authentication</span><strong>{route.authRequired ? 'Required' : 'Public'}</strong></div>
+            {route.requiredRoles?.length ? <div><span>Required roles</span><strong>{route.requiredRoles.join(', ')}</strong></div> : null}
             <div><span>Created</span><strong>{route.createdAt ? new Date(route.createdAt).toLocaleString() : '—'}</strong></div>
             <div><span>Last updated</span><strong>{route.updatedAt ? new Date(route.updatedAt).toLocaleString() : '—'}</strong></div>
           </div>
